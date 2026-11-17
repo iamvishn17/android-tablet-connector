@@ -126,11 +126,17 @@ jobs:
           echo.
           echo 1. The original pen-pressure diagnostic receiver will open.
           echo 2. In that window, click Refresh tablet, then Start USB receiver.
-          echo 3. Install and open AnyDisplay-SemiFinal.apk on your tablet.
-          echo 4. Return here and press a key to start the low-latency display link.
+          echo 3. Return here and press a key. The launcher installs and opens AnyDisplay.
           echo.
           start "Pen Pressure Diagnostics" "PenTelemetry.exe"
           pause
+          "%ANYDISPLAY_ADB%" install -r "%~dp0Android\AnyDisplay-SemiFinal.apk"
+          if errorlevel 1 (
+            echo APK installation failed. Check USB debugging authorization and retry.
+            pause
+            exit /b 1
+          )
+          "%ANYDISPLAY_ADB%" shell monkey -p dev.anydisplay.client 1
           "anydisplay-win.exe" usb --codec h264 --no-audio --no-clipboard
           echo.
           echo AnyDisplay has stopped. Press any key to close.
@@ -147,12 +153,11 @@ jobs:
           
           INSTALL
           1. Extract the entire ZIP to a normal folder.
-          2. Install Android/AnyDisplay-SemiFinal.apk on the Lenovo Tab P12.
-          3. Enable Developer options and USB debugging; connect by USB and accept the authorization prompt.
-          4. Double-click Start-SemiFinal.bat.
-          5. In the Pen Pressure Diagnostics window, click Refresh tablet and then Start USB receiver.
-          6. Open AnyDisplay on the tablet and wait for its home screen.
-          7. Return to the launcher console and press a key. The Windows host will connect over USB.
+          2. Enable Developer options and USB debugging on the tablet; connect by USB and accept the authorization prompt.
+          3. Double-click Start-SemiFinal.bat.
+          4. In the Pen Pressure Diagnostics window, click Refresh tablet and then Start USB receiver.
+          5. Return to the launcher console and press a key. It installs/opens AnyDisplay and starts the USB host.
+          6. If automatic APK installation fails, install Android/AnyDisplay-SemiFinal.apk manually and retry.
           
           EXTENDED DESKTOP
           - AnyDisplay uses the open-source Virtual Display Driver (VDD) for a real extra monitor.
