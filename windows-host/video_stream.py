@@ -67,7 +67,7 @@ class VideoStreamer:
             try:
                 conn, _ = self.server.accept()
                 self.client = conn
-                self.log("Tablet connected to video channel. Sending primary screen.")
+                self.log(f"Tablet connected to video channel. Streaming Windows display #{monitor_index}.")
                 threading.Thread(target=self._send_frames, args=(conn, monitor_index), daemon=True).start()
             except socket.timeout:
                 continue
