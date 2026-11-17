@@ -107,6 +107,17 @@ private class PenLinkClient(private val onConnection: (Boolean) -> Unit) {
 }
 
 private class PenDiagnosticView(context: android.content.Context) : View(context) {
+    init { isFocusable = true; isFocusableInTouchMode = true }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        updateFrom(event)
+        return true
+    }
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        updateFrom(event)
+        return true
+    }
     private val heading = Paint(3).apply { color = Color.WHITE; textSize = 27f; typeface = Typeface.DEFAULT_BOLD }
     private val body = Paint(3).apply { color = Color.rgb(210, 220, 235); textSize = 17f }
     private val muted = Paint(3).apply { color = Color.rgb(145, 160, 180); textSize = 13f }
