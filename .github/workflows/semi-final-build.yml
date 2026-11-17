@@ -1,0 +1,200 @@
+name: Build USB Pen Display Semi-Final
+
+on:
+  push:
+    branches: ["semi-final"]
+    paths:
+      - ".github/workflows/semi-final-build.yml"
+      - "tools/patch_anydisplay.py"
+      - "windows-host/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ANYDISPLAY_REPO: efekurucay/anydisplay
+  ANYDISPLAY_REF: d090a9e20ac785fb34d1f53877e095c319e02569
+
+jobs:
+  android:
+    name: Build integrated Android client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: efekurucay/anydisplay
+          ref: d090a9e20ac785fb34d1f53877e095c319e02569
+          path: vendor/anydisplay
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Add original pen telemetry channel
+        run: python tools/patch_anydisplay.py vendor/anydisplay
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build AnyDisplay Android APK
+        working-directory: vendor/anydisplay/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: semi-final-android
+          path: vendor/anydisplay/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Build Windows display host and original pen receiver
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: efekurucay/anydisplay
+          ref: d090a9e20ac785fb34d1f53877e095c319e02569
+          path: vendor/anydisplay
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build AnyDisplay Windows host
+        working-directory: vendor/anydisplay/windows
+        run: cargo build --release
+      - name: Build original pressure diagnostics host
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r windows-host/requirements.txt
+          pip install pyinstaller
+          pyinstaller --noconfirm --clean --onefile --windowed --collect-all mss --collect-all PIL --name PenTelemetry windows-host/main.py
+      - name: Bundle Android Platform Tools
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "platform-tools.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "platform-tools"
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          New-Item -ItemType Directory -Force -Path "dist-semi-final/platform-tools" | Out-Null
+          Copy-Item "$extract/platform-tools/*" "dist-semi-final/platform-tools/" -Recurse -Force
+          Copy-Item "vendor/anydisplay/windows/target/release/anydisplay-win.exe" "dist-semi-final/anydisplay-win.exe"
+          Copy-Item "dist/PenTelemetry.exe" "dist-semi-final/PenTelemetry.exe"
+          if (-not (Test-Path "dist-semi-final/platform-tools/adb.exe")) { throw "ADB missing from Platform Tools." }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: semi-final-windows
+          path: dist-semi-final/**
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: Package semi-final ZIP
+    runs-on: ubuntu-latest
+    needs: [android, windows]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: semi-final-android
+          path: bundle/Android
+      - uses: actions/download-artifact@v4
+        with:
+          name: semi-final-windows
+          path: bundle/Windows
+      - name: Prepare launcher, notices and instructions
+        run: |
+          mv bundle/Android/app-debug.apk bundle/Android/AnyDisplay-SemiFinal.apk
+          cat > bundle/Start-SemiFinal.bat <<'EOF'
+          @echo off
+          setlocal
+          cd /d "%~dp0Windows"
+          set "ANYDISPLAY_ADB=%~dp0Windows\platform-tools\adb.exe"
+          echo ============================================================
+          echo USB PEN DISPLAY - SEMI-FINAL
+          echo ============================================================
+          echo.
+          echo 1. The original pen-pressure diagnostic receiver will open.
+          echo 2. In that window, click Refresh tablet, then Start USB receiver.
+          echo 3. Install and open AnyDisplay-SemiFinal.apk on your tablet.
+          echo 4. Return here and press a key to start the low-latency display link.
+          echo.
+          start "Pen Pressure Diagnostics" "PenTelemetry.exe"
+          pause
+          "anydisplay-win.exe" usb --codec h264 --no-audio --no-clipboard
+          echo.
+          echo AnyDisplay has stopped. Press any key to close.
+          pause
+          EOF
+          cat > bundle/README-FIRST.txt <<'EOF'
+          USB PEN DISPLAY — SEMI-FINAL INTEGRATION BUILD
+          
+          WHAT THIS BUILD COMBINES
+          - AnyDisplay's DXGI desktop capture and Media Foundation hardware H.264/HEVC pipeline.
+          - AnyDisplay's Android MediaCodec hardware video decoder and USB protocol.
+          - AnyDisplay's Windows pen/touch injection path.
+          - The original project's separate JSON pen-pressure telemetry on TCP 27183.
+          
+          INSTALL
+          1. Extract the entire ZIP to a normal folder.
+          2. Install Android/AnyDisplay-SemiFinal.apk on the Lenovo Tab P12.
+          3. Enable Developer options and USB debugging; connect by USB and accept the authorization prompt.
+          4. Double-click Start-SemiFinal.bat.
+          5. In the Pen Pressure Diagnostics window, click Refresh tablet and then Start USB receiver.
+          6. Open AnyDisplay on the tablet and wait for its home screen.
+          7. Return to the launcher console and press a key. The Windows host will connect over USB.
+          
+          EXTENDED DESKTOP
+          - AnyDisplay uses the open-source Virtual Display Driver (VDD) for a real extra monitor.
+          - Without VDD, it mirrors a selected monitor; it does not create an extra Windows display.
+          - VDD is not bundled. Install it separately from https://github.com/VirtualDrivers/Virtual-Display-Driver/releases
+          - After installing VDD, set Windows Display Settings to Extend and use the VDD monitor.
+          
+          PEN INPUT
+          - AnyDisplay's binary PEN protocol feeds Windows pen injection, including pressure.
+          - The added compatibility channel sends the same Android MotionEvent pressure/coordinates to the original PC diagnostics receiver on port 27183.
+          - The diagnostics window is a telemetry proof/monitor; it is not the Windows Ink injection engine.
+          
+          IMPORTANT LIMITATIONS
+          - AnyDisplay's Windows host is experimental. The upstream project reports limited Windows hardware validation; test your Lenovo Tab P12 and Windows 10 machine.
+          - Real stylus hardware and pressure injection still need verification on your device.
+          - This is a semi-final integration build, not a claim of fully validated production readiness.
+          - Manual USB refresh is retained in the original diagnostics host. No background USB polling was added.
+          - If AnyDisplay fails to connect, close both apps, reconnect the tablet, click Refresh tablet and Start USB receiver, reopen AnyDisplay, then retry.
+          
+          THIRD-PARTY NOTICES
+          AnyDisplay is MIT licensed. See THIRD-PARTY-NOTICES.txt for its copyright and license.
+          EOF
+          cat > bundle/THIRD-PARTY-NOTICES.txt <<'EOF'
+          AnyDisplay
+          Copyright (c) 2026 Yahya Efe Kuruçay
+          Licensed under the MIT License.
+          
+          Permission is hereby granted, free of charge, to any person obtaining a copy
+          of this software and associated documentation files (the "Software"), to deal
+          in the Software without restriction, including without limitation the rights
+          to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+          copies of the Software, and to permit persons to whom the Software is
+          furnished to do so, subject to the following conditions:
+          
+          The above copyright notice and this permission notice shall be included in all
+          copies or substantial portions of the Software.
+          
+          THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+          IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+          FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+          AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+          LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+          OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+          SOFTWARE.
+          EOF
+          cd bundle
+          zip -r ../USB-Pen-Display-Semi-Final.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: USB-Pen-Display-Semi-Final
+          path: USB-Pen-Display-Semi-Final.zip
+          if-no-files-found: error
+          retention-days: 14
