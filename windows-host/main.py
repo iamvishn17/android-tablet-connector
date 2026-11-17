@@ -116,7 +116,7 @@ class Host:
                 self.server_thread=threading.Thread(target=self.accept_loop,daemon=True); self.server_thread.start()
             except Exception as e:
                 self.root.after(0,lambda:self.link_status.configure(text="Could not start USB pen link"))
-                self.root.after(0,lambda:messagebox.showerror("USB Pen Display",str(e)))
+                self.root.after(0,lambda err=str(e):messagebox.showerror("USB Pen Display",err))
         threading.Thread(target=work,daemon=True).start()
 
     def accept_loop(self):
@@ -146,7 +146,7 @@ class Host:
                                  f"Buttons: {data.get('buttons')}    Hover: {data.get('hover')}    Contact: {data.get('contact')}")
                         self.root.after(0,lambda s=summary:self.live_values.configure(text=s))
                 except Exception as e:
-                    self.root.after(0,lambda:self.write("Invalid event received: "+str(e)))
+                    self.root.after(0,lambda err=str(e):self.write("Invalid event received: "+err))
         except OSError: pass
         finally:
             try: conn.close()
