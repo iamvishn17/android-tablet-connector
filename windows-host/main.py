@@ -118,7 +118,6 @@ class Host:
         self.log.pack(fill="x")
         self.write("Ready. Start the receiver, then open the tablet app.")
         self.refresh_displays()
-        root.after(250, self.refresh)
         root.after(30, self.process_messages)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
