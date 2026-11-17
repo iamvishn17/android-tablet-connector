@@ -1,4 +1,4 @@
-name: Build USB Pen Display Semi-Final
+name: Build USB Pen Display Final
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Add original pen telemetry channel
+      - name: Add original pen telemetry compatibility channel
         run: python tools/patch_anydisplay.py vendor/anydisplay
       - uses: actions/setup-java@v4
         with:
@@ -51,13 +51,13 @@ jobs:
           ./gradlew --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: semi-final-android
+          name: final-android
           path: vendor/anydisplay/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
   windows:
-    name: Build Windows display host and original pen receiver
+    name: Build unified Windows receiver
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,120 +70,109 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build AnyDisplay Windows host
+      - name: Build AnyDisplay native Windows host
         working-directory: vendor/anydisplay/windows
         run: cargo build --release
-      - name: Build original pressure diagnostics host
+      - name: Build the unified PC receiver interface
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r windows-host/requirements.txt
           pip install pyinstaller
-          pyinstaller --noconfirm --clean --onefile --windowed --collect-all mss --collect-all PIL --name PenTelemetry windows-host/main.py
-      - name: Bundle Android Platform Tools
+          pyinstaller --noconfirm --clean --onefile --windowed --name USBPenDisplayReceiver windows-host/receiver.py
+      - name: Bundle Android Platform Tools and receiver
         shell: pwsh
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "platform-tools.zip"
           $extract = Join-Path $env:RUNNER_TEMP "platform-tools"
           Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $archive
           Expand-Archive -Path $archive -DestinationPath $extract -Force
-          New-Item -ItemType Directory -Force -Path "dist-semi-final/platform-tools" | Out-Null
-          Copy-Item "$extract/platform-tools/*" "dist-semi-final/platform-tools/" -Recurse -Force
-          Copy-Item "vendor/anydisplay/windows/target/release/anydisplay-win.exe" "dist-semi-final/anydisplay-win.exe"
-          Copy-Item "dist/PenTelemetry.exe" "dist-semi-final/PenTelemetry.exe"
-          if (-not (Test-Path "dist-semi-final/platform-tools/adb.exe")) { throw "ADB missing from Platform Tools." }
+          New-Item -ItemType Directory -Force -Path "dist-final/Windows/platform-tools" | Out-Null
+          Copy-Item "$extract/platform-tools/*" "dist-final/Windows/platform-tools/" -Recurse -Force
+          Copy-Item "vendor/anydisplay/windows/target/release/anydisplay-win.exe" "dist-final/Windows/anydisplay-win.exe"
+          Copy-Item "dist/USBPenDisplayReceiver.exe" "dist-final/Windows/USBPenDisplayReceiver.exe"
+          if (-not (Test-Path "dist-final/Windows/platform-tools/adb.exe")) { throw "ADB missing from Platform Tools." }
       - uses: actions/upload-artifact@v4
         with:
-          name: semi-final-windows
-          path: dist-semi-final/**
+          name: final-windows
+          path: dist-final/Windows/**
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
   package:
-    name: Package semi-final ZIP
+    name: Package final USB Pen Display ZIP
     runs-on: ubuntu-latest
     needs: [android, windows]
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: semi-final-android
+          name: final-android
           path: bundle/Android
       - uses: actions/download-artifact@v4
         with:
-          name: semi-final-windows
+          name: final-windows
           path: bundle/Windows
-      - name: Prepare launcher, notices and instructions
+      - name: Prepare launcher and setup guide
         run: |
-          mv bundle/Android/app-debug.apk bundle/Android/AnyDisplay-SemiFinal.apk
-          cat > bundle/Start-SemiFinal.bat <<'EOF'
+          mv bundle/Android/app-debug.apk bundle/Android/AnyDisplay-Final.apk
+          cat > bundle/Start-USB-Pen-Display.bat <<'EOF'
           @echo off
           setlocal
           cd /d "%~dp0Windows"
-          set "ANYDISPLAY_ADB=%~dp0Windows\platform-tools\adb.exe"
-          echo ============================================================
-          echo USB PEN DISPLAY - SEMI-FINAL
-          echo ============================================================
-          echo.
-          echo 1. The original pen-pressure diagnostic receiver will open.
-          echo 2. In that window, click Refresh tablet, then Start USB receiver.
-          echo 3. Return here and press a key. The launcher installs and opens AnyDisplay.
-          echo.
-          start "Pen Pressure Diagnostics" "PenTelemetry.exe"
-          pause
-          "%ANYDISPLAY_ADB%" install -r "%~dp0Android\AnyDisplay-SemiFinal.apk"
-          if errorlevel 1 (
-            echo APK installation failed. Check USB debugging authorization and retry.
+          if not exist "USBPenDisplayReceiver.exe" (
+            echo Windows receiver is missing. Extract the complete ZIP again.
             pause
             exit /b 1
           )
-          "%ANYDISPLAY_ADB%" shell monkey -p dev.anydisplay.client 1
-          "anydisplay-win.exe" usb --codec h264 --no-audio --no-clipboard
-          echo.
-          echo AnyDisplay has stopped. Press any key to close.
-          pause
+          start "" "USBPenDisplayReceiver.exe"
           EOF
           cat > bundle/README-FIRST.txt <<'EOF'
-          USB PEN DISPLAY — SEMI-FINAL INTEGRATION BUILD
+          USB PEN DISPLAY — FINAL RECEIVER BUILD
           
-          WHAT THIS BUILD COMBINES
-          - AnyDisplay's DXGI desktop capture and Media Foundation hardware H.264/HEVC pipeline.
-          - AnyDisplay's Android MediaCodec hardware video decoder and USB protocol.
-          - AnyDisplay's Windows pen/touch injection path.
-          - The original project's separate JSON pen-pressure telemetry on TCP 27183.
+          WHAT THIS BUILD DOES
+          - Detects an authorized Android tablet over USB automatically.
+          - Installs/updates and launches the AnyDisplay Android client.
+          - Starts the AnyDisplay Windows host over ADB USB forwarding.
+          - Streams the selected Windows display to the tablet using hardware H.264 encoding/decoding where available.
+          - Sends stylus pressure, coordinates, tilt, eraser and pen contact through AnyDisplay's native Windows synthetic-pen input path.
+          - Provides one Windows interface for connection state, stream state, logs, retry and stop.
           
-          INSTALL
-          1. Extract the entire ZIP to a normal folder.
-          2. Enable Developer options and USB debugging on the tablet; connect by USB and accept the authorization prompt.
-          3. Double-click Start-SemiFinal.bat.
-          4. In the Pen Pressure Diagnostics window, click Refresh tablet and then Start USB receiver.
-          5. Return to the launcher console and press a key. It installs/opens AnyDisplay and starts the USB host.
-          6. If automatic APK installation fails, install Android/AnyDisplay-SemiFinal.apk manually and retry.
+          INSTALL AND USE
+          1. Extract the entire ZIP to a normal folder. Do not move files out of their folders.
+          2. On the tablet, enable Developer options and USB debugging.
+          3. Connect the tablet to the PC with a USB data cable, unlock it and accept the USB debugging authorization prompt.
+          4. Double-click Start-USB-Pen-Display.bat.
+          5. The receiver detects the tablet and starts the display session automatically.
+          6. Keep the receiver open while using the tablet as your display/pen tablet.
           
-          EXTENDED DESKTOP
-          - AnyDisplay uses the open-source Virtual Display Driver (VDD) for a real extra monitor.
-          - Without VDD, it mirrors a selected monitor; it does not create an extra Windows display.
-          - VDD is not bundled. Install it separately from https://github.com/VirtualDrivers/Virtual-Display-Driver/releases
-          - After installing VDD, set Windows Display Settings to Extend and use the VDD monitor.
+          PEN PRESSURE — IMPORTANT
+          Pressure is not a separate test or preview feature. The Android client sends stylus MotionEvents through AnyDisplay's PEN protocol. The Windows host converts those samples into synthetic Windows pen pointer events with pressure/tilt masks. Compatible drawing applications can consume that as pen input while the stream is active.
+          This is the native input path; the old separate pressure diagnostic window is not part of this build.
           
-          PEN INPUT
-          - AnyDisplay's binary PEN protocol feeds Windows pen injection, including pressure.
-          - The added compatibility channel sends the same Android MotionEvent pressure/coordinates to the original PC diagnostics receiver on port 27183.
-          - The diagnostics window is a telemetry proof/monitor; it is not the Windows Ink injection engine.
+          EXTENDED DISPLAY
+          AnyDisplay uses the Virtual Display Driver (VDD) to create a real extra Windows monitor. Without VDD, the session mirrors a selected existing monitor.
+          1. Install VDD separately from https://github.com/VirtualDrivers/Virtual-Display-Driver/releases
+          2. In Windows Settings > System > Display, choose Extend these displays and arrange the virtual monitor.
+          3. The AnyDisplay host selects the VDD monitor by default when available.
           
-          IMPORTANT LIMITATIONS
-          - AnyDisplay's Windows host is experimental. The upstream project reports limited Windows hardware validation; test your Lenovo Tab P12 and Windows 10 machine.
-          - Real stylus hardware and pressure injection still need verification on your device.
-          - This is a semi-final integration build, not a claim of fully validated production readiness.
-          - Manual USB refresh is retained in the original diagnostics host. No background USB polling was added.
-          - If AnyDisplay fails to connect, close both apps, reconnect the tablet, click Refresh tablet and Start USB receiver, reopen AnyDisplay, then retry.
+          TROUBLESHOOTING
+          - If Windows asks about USB debugging, unlock the tablet and accept the authorization prompt.
+          - If the receiver cannot find ADB, re-extract the complete ZIP; platform-tools/adb.exe must remain inside the Windows folder.
+          - If the tablet is connected but sharing fails, press Reconnect / Retry in the receiver.
+          - Close and reopen the receiver after changing USB ports or reinstalling the Android client.
+          - Input into elevated/admin applications may require running the receiver as administrator because Windows blocks lower-integrity input injection.
           
-          THIRD-PARTY NOTICES
-          AnyDisplay is MIT licensed. See THIRD-PARTY-NOTICES.txt for its copyright and license.
+          VALIDATION NOTE
+          CI verifies that the Android APK, Windows host and receiver package compile successfully. Actual USB stability, Lenovo Tab P12 stylus behavior, Windows Ink compatibility and application-specific pressure response must still be tested on the physical Windows 10 PC and tablet. A successful build is not a substitute for that hardware test.
+          
+          THIRD-PARTY SOFTWARE
+          AnyDisplay is pinned to commit d090a9e20ac785fb34d1f53877e095c319e02569 and is MIT licensed. See https://github.com/efekurucay/anydisplay
+          Virtual Display Driver is a separate third-party MIT-licensed project and is not bundled.
           EOF
           cat > bundle/THIRD-PARTY-NOTICES.txt <<'EOF'
           AnyDisplay
           Copyright (c) 2026 Yahya Efe Kuruçay
           Licensed under the MIT License.
+          https://github.com/efekurucay/anydisplay
           
           Permission is hereby granted, free of charge, to any person obtaining a copy
           of this software and associated documentation files (the "Software"), to deal
@@ -197,17 +186,13 @@ jobs:
           
           THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
           IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-          FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-          AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-          LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-          OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-          SOFTWARE.
+          FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
           EOF
           cd bundle
-          zip -r ../USB-Pen-Display-Semi-Final.zip .
+          zip -r ../USB-Pen-Display-Final.zip .
       - uses: actions/upload-artifact@v4
         with:
-          name: USB-Pen-Display-Semi-Final
-          path: USB-Pen-Display-Semi-Final.zip
+          name: USB-Pen-Display-Final
+          path: USB-Pen-Display-Final.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
