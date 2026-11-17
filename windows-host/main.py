@@ -146,6 +146,7 @@ class Host:
         self.root.after(2000, self.monitor_usb)
 
     def finish_monitor(self, result):
+        self.monitor_busy = False
         new_device = result.get("device")
         old_device = self.device
         self.adb = result.get("adb")
