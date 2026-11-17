@@ -41,7 +41,7 @@ class Host:
         self.last_pointer = None
         self.video_streamer = VideoStreamer(lambda msg: self.root.after(0, lambda: self.write(msg)))
 
-        root.title("USB Pen Display — Pressure Canvas")
+        root.title("USB Pen Display — Video Stream Test")
         root.geometry("1050x850")
         root.minsize(850, 700)
         style = ttk.Style()
@@ -54,8 +54,8 @@ class Host:
 
         outer = ttk.Frame(root, padding=16)
         outer.pack(fill="both", expand=True)
-        ttk.Label(outer, text="USB PEN PRESSURE TEST", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(outer, text="Draw on the tablet canvas — the same stroke and pressure should appear here.",
+        ttk.Label(outer, text="USB SCREEN VIDEO TEST", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(outer, text="Stream this PC screen to the tablet over USB. Pen pressure telemetry runs alongside the video test.",
                   style="Muted.TLabel").pack(anchor="w", pady=(3, 10))
 
         connection = ttk.LabelFrame(outer, text=" USB CONNECTION ", padding=10)
@@ -75,7 +75,7 @@ class Host:
         self.install_btn = ttk.Button(buttons, text="Install / update APK", command=self.install, state="disabled")
         self.install_btn.pack(side="left", padx=6)
 
-        telemetry = ttk.LabelFrame(outer, text=" RECEIVED FROM TABLET ", padding=10)
+        telemetry = ttk.LabelFrame(outer, text=" PEN INPUT DIAGNOSTICS ", padding=10)
         telemetry.pack(fill="x", pady=10)
         self.link_label = ttk.Label(telemetry, text="TCP: not connected     App handshake: not received     Pen events: 0",
                                     font=("Segoe UI", 10, "bold"))
@@ -86,7 +86,7 @@ class Host:
         self.pressure_bar = tk.Canvas(telemetry, height=18, bg="#263345", highlightthickness=0)
         self.pressure_bar.pack(fill="x")
         
-        drawing = ttk.LabelFrame(outer, text=" PC DRAWING CANVAS — TABLET INPUT ", padding=8)
+        drawing = ttk.LabelFrame(outer, text=" PEN INPUT PREVIEW ", padding=8)
         drawing.pack(fill="both", expand=True)
         canvas_row = ttk.Frame(drawing)
         canvas_row.pack(fill="both", expand=True)
@@ -95,7 +95,7 @@ class Host:
         self.canvas.pack(fill="both", expand=True)
         footer = ttk.Frame(drawing)
         footer.pack(fill="x", pady=(6, 0))
-        ttk.Label(footer, text="A pressure-sensitive stroke should appear above.").pack(side="left")
+        ttk.Label(footer, text="Optional: tablet stylus input is mirrored here while video is streaming.").pack(side="left")
         ttk.Button(footer, text="Clear PC canvas", command=self.clear_canvas).pack(side="right")
 
         log_frame = ttk.LabelFrame(outer, text=" DIAGNOSTIC LOG ", padding=6)
