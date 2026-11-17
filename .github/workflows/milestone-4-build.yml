@@ -99,8 +99,11 @@ jobs:
       - name: Build IddCx sample using Microsoft's build orchestrator
         shell: pwsh
         run: |
-          & "_driver_samples/Build-Samples.ps1" -Samples "video.indirectdisplay" -Configurations "Release" -Platforms "x64" -RunMode "NuGet" -NtTargetVersion "10.0.28000" -ThrottleLimit 1
-          if ($LASTEXITCODE -ne 0) { throw "IddCx sample build failed." }
+          Push-Location "_driver_samples"
+          & ".\\Build-Samples.ps1" -Samples "video.indirectdisplay" -Configurations "Release" -Platforms "x64" -RunMode "NuGet" -NtTargetVersion "10.0.28000" -ThrottleLimit 1
+          $buildExitCode = $LASTEXITCODE
+          Pop-Location
+          if ($buildExitCode -ne 0) { throw "IddCx sample build failed." }
       - name: Collect driver package, sample app and source
         shell: pwsh
         run: |
