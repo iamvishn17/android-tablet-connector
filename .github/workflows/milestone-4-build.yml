@@ -92,6 +92,7 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <packages>
             <package id="Microsoft.Windows.WDK.x64" version="10.0.28000.2526" targetFramework="native" />
+            <package id="Microsoft.Windows.SDK.CPP.x64" version="10.0.28000.2526" targetFramework="native" />
           </packages>
           '@ | Set-Content "_driver_samples/packages.config" -Encoding utf8
           nuget restore "_driver_samples/packages.config" -PackagesDirectory "_driver_samples/packages"
@@ -99,6 +100,7 @@ jobs:
       - name: Build IddCx sample using Microsoft's build orchestrator
         shell: pwsh
         run: |
+          $env:WindowsTargetPlatformVersion = "10.0.28000.0"
           Push-Location "_driver_samples"
           & ".\\Build-Samples.ps1" -Samples "video.indirectdisplay" -Configurations "Release" -Platforms "x64" -RunMode "NuGet" -NtTargetVersion "10.0.28000" -ThrottleLimit 1
           $buildExitCode = $LASTEXITCODE
