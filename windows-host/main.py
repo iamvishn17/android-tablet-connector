@@ -2,7 +2,6 @@ import json, os, platform, queue, shutil, socket, subprocess, sys, threading, tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-APP_ID = "com.usbpendisplay.diagnostic"
 PORT = 27183
 
 def find_adb():
@@ -74,10 +73,6 @@ class Host:
         self.refresh_btn = ttk.Button(buttons, text="Refresh tablet", command=self.refresh)
         self.refresh_btn.pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text="Start USB receiver", command=self.start_link).pack(side="left", padx=6)
-        self.launch_btn = ttk.Button(buttons, text="Open tablet app", command=self.launch, state="disabled")
-        self.launch_btn.pack(side="left", padx=6)
-        self.install_btn = ttk.Button(buttons, text="Install / update APK", command=self.install, state="disabled")
-        self.install_btn.pack(side="left", padx=6)
 
         telemetry = ttk.LabelFrame(outer, text=" PEN INPUT DIAGNOSTICS ", padding=10)
         telemetry.pack(fill="x", pady=10)
@@ -177,9 +172,6 @@ class Host:
             raw = result.get("raw", "")
             self.detail.configure(text=("ADB sees no authorized device. Check the tablet's USB debugging driver. " + raw[-140:]).strip())
             self.write("ADB device scan returned: " + (raw or "(no device entries)"))
-        state = "normal" if self.device else "disabled"
-        self.launch_btn.configure(state=state)
-        self.install_btn.configure(state=state)
 
     def start_link(self):
         if not self.adb or not self.device:
@@ -328,37 +320,6 @@ class Host:
         self.canvas.delete("all")
         self.last_point = None
         self.last_pointer = None
-
-    def launch(self):
-        if not self.adb or not self.device:
-            return
-        def work():
-            try:
-                p = subprocess.run([self.adb, "-s", self.device, "shell", "monkey", "-p", APP_ID, "1"],
-                                   capture_output=True, text=True, timeout=15)
-                if p.returncode:
-                    raise RuntimeError((p.stderr or p.stdout).strip())
-                self.root.after(0, lambda: self.write("Launch command sent to tablet."))
-            except Exception as exc:
-                self.root.after(0, lambda e=str(exc): messagebox.showerror("USB Pen Display", e))
-        threading.Thread(target=work, daemon=True).start()
-
-    def install(self):
-        if not self.adb or not self.device:
-            return
-        apk = filedialog.askopenfilename(title="Select Android APK", filetypes=[("Android APK", "*.apk")])
-        if not apk:
-            return
-        def work():
-            try:
-                p = subprocess.run([self.adb, "-s", self.device, "install", "-r", apk],
-                                   capture_output=True, text=True, timeout=90)
-                if p.returncode:
-                    raise RuntimeError((p.stdout + "\n" + p.stderr).strip())
-                self.root.after(0, lambda: messagebox.showinfo("USB Pen Display", "APK installed successfully."))
-            except Exception as exc:
-                self.root.after(0, lambda e=str(exc): messagebox.showerror("USB Pen Display", e))
-        threading.Thread(target=work, daemon=True).start()
 
     def close(self):
         try:
