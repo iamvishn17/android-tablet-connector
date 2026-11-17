@@ -21,3 +21,5 @@ IMPORTANT
 - Keep the original Microsoft copyright and license notices with the sample source.
 
 CI note: only the x64 WDK package is restored, and the driver build is driven by Microsoft's Build-Samples.ps1 script.
+
+The build script runs from the Microsoft sample repository root so its NuGet package discovery resolves correctly.
