@@ -1,0 +1,134 @@
+name: Build USB Pen Display Milestone 4.5
+
+on:
+  push:
+    branches: ["milestone-4.5"]
+    paths:
+      - "windows-host/**"
+      - "app/**"
+      - ".github/workflows/milestone-4.5-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android SDK packages
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Build APK
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: "8.9"
+          arguments: --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: milestone45-android
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Build Windows PC application
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r windows-host/requirements.txt
+          pip install pyinstaller
+      - name: Build PC application
+        working-directory: windows-host
+        run: pyinstaller --noconfirm --clean --onefile --windowed --collect-all mss --collect-all PIL --name USBPenDisplayHost main.py
+      - name: Bundle Android Platform Tools
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "platform-tools.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "platform-tools"
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          New-Item -ItemType Directory -Force -Path "windows-host/dist/platform-tools" | Out-Null
+          Copy-Item "$extract/platform-tools/*" "windows-host/dist/platform-tools/" -Recurse -Force
+          if (-not (Test-Path "windows-host/dist/platform-tools/adb.exe")) { throw "ADB was not included in the Platform Tools archive." }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: milestone45-windows
+          path: |
+            windows-host/dist/USBPenDisplayHost.exe
+            windows-host/dist/platform-tools/
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: Package Milestone 4.5 ZIP
+    runs-on: ubuntu-latest
+    needs: [android, windows]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: milestone45-android
+          path: bundle/Android
+      - uses: actions/download-artifact@v4
+        with:
+          name: milestone45-windows
+          path: bundle/Windows
+      - name: Add instructions and create ZIP
+        run: |
+          cat > bundle/README-FIRST.txt <<'EOF'
+          USB PEN DISPLAY — MILESTONE 4.5
+
+          WHAT IS INCLUDED
+          - Android/app-debug.apk: install this on the Lenovo tablet.
+          - Windows/USBPenDisplayHost.exe: Windows 10/11 companion application.
+          - Windows/platform-tools/: ADB is included; do not install it separately.
+
+          INSTALL
+          1. Extract this entire ZIP to a normal folder. Do not run the EXE from inside the ZIP.
+          2. On the tablet, install Android/app-debug.apk. If Android asks, allow installation from your file manager/browser.
+          3. Enable Developer options and USB debugging on the tablet.
+          4. Connect the tablet to the PC with a USB data cable and accept the USB debugging prompt.
+          5. Double-click USBPenDisplayHost.exe.
+          6. Click Refresh tablet (manual refresh only).
+          7. Click Start USB receiver.
+          8. Open the USB Pen Display app on the tablet.
+          9. On the PC, click Refresh displays, select the display you want to stream, then click Start screen video.
+
+          PERFORMANCE SETTINGS
+          - Maximum stream size: 1280x720 (720p)
+          - Target frame rate: 30 FPS
+          - JPEG quality: 45
+          - Latest-frame-wins: old unsent frames are discarded instead of queued.
+          - Performance log reports FPS, dropped frames, capture/encode/send time and average frame size.
+
+          IMPORTANT
+          - This build improves USB screen streaming. It does not itself install a virtual monitor driver.
+          - If you already installed Virtual Display Driver in the previous milestone, select that display in Refresh displays to stream it.
+          - The video channel is separate from stylus telemetry. Stylus data remains on port 27183; video remains on port 27184.
+          - Manual tablet refresh is retained. No background USB polling was added.
+          - 30 FPS is a target, not a guarantee; actual performance depends on the PC, tablet and USB connection.
+          - This build has not yet been tested on your physical Windows PC and Lenovo tablet. Please report the [perf] lines after testing.
+          EOF
+          cd bundle
+          zip -r ../Milestone-4.5.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Milestone-4.5
+          path: Milestone-4.5.zip
+          if-no-files-found: error
+          retention-days: 14
