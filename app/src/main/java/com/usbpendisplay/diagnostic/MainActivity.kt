@@ -137,9 +137,9 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
     private var y = 0f
     private var hover = false
     private var buttons = 0
-    private val margin = 24f
-    private val canvasTop = 154f
-    private val bottom = 24f
+    private val margin = 0f
+    private val canvasTop = 0f
+    private val bottom = 0f
     fun setPcLink(connected: Boolean) { pcConnected = connected; invalidate() }
     override fun onTouchEvent(event: MotionEvent): Boolean { handle(event); return true }
     override fun onGenericMotionEvent(event: MotionEvent): Boolean { handle(event); return true }
@@ -161,10 +161,10 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
         tool = toolName; action = actionName; buttons = e.buttonState
         hover = e.actionMasked == MotionEvent.ACTION_HOVER_ENTER || e.actionMasked == MotionEvent.ACTION_HOVER_MOVE || e.actionMasked == MotionEvent.ACTION_HOVER_EXIT
         eventCount++
-        val cw = (width - margin * 2).coerceAtLeast(1f)
-        val ch = (height - canvasTop - bottom).coerceAtLeast(1f)
-        val cx = (x - margin).coerceIn(0f, cw)
-        val cy = (y - canvasTop).coerceIn(0f, ch)
+        val cw = width.coerceAtLeast(1).toFloat()
+        val ch = height.coerceAtLeast(1).toFloat()
+        val cx = x.coerceIn(0f, cw)
+        val cy = y.coerceIn(0f, ch)
         val drawTool = type == MotionEvent.TOOL_TYPE_STYLUS || type == MotionEvent.TOOL_TYPE_ERASER || type == MotionEvent.TOOL_TYPE_FINGER
         if (drawTool && (e.actionMasked == MotionEvent.ACTION_DOWN || e.actionMasked == MotionEvent.ACTION_POINTER_DOWN)) {
             val paint = Paint(3).apply {
@@ -199,31 +199,35 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        c.drawColor(Color.rgb(12, 17, 27))
-        c.drawText("USB PEN DISPLAY — VIDEO + PEN TEST", margin, 38f, heading)
-        c.drawText("PC screen video appears below when the Windows host starts streaming.", margin, 65f, label)
-        c.drawText("PC LINK: " + (if (pcConnected) "CONNECTED" else "WAITING"), margin, 100f, value)
-        c.drawText("INPUT: $tool | $action | events: $eventCount", margin, 126f, label)
-        c.drawText("Pressure: %.3f   Maximum: %.3f   Buttons: %d".format(pressure, maxPressure, buttons), margin, 146f, label)
-        val rect = RectF(margin, canvasTop, width - margin, height - bottom)
-        c.drawRoundRect(rect, 12f, 12f, board)
-        videoFrame?.let { frame ->
-            val dst = RectF(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
-            c.save(); c.clipRect(dst); c.drawBitmap(frame, null, dst, Paint(Paint.FILTER_BITMAP_FLAG)); c.restore()
+        c.drawColor(Color.BLACK)
+        val frame = videoFrame
+        if (frame != null) {
+            val srcW = frame.width.toFloat()
+            val srcH = frame.height.toFloat()
+            val scale = maxOf(width / srcW, height / srcH)
+            val dstW = srcW * scale
+            val dstH = srcH * scale
+            val dst = RectF((width - dstW) / 2f, (height - dstH) / 2f,
+                            (width + dstW) / 2f, (height + dstH) / 2f)
+            c.drawBitmap(frame, null, dst, Paint(Paint.FILTER_BITMAP_FLAG))
+        } else {
+            val p = Paint(3).apply { color = Color.WHITE; textSize = 25f; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+            val small = Paint(3).apply { color = Color.rgb(190, 205, 225); textSize = 16f }
+            c.drawText("USB VIDEO TEST", 28f, 58f, p)
+            c.drawText("Waiting for the PC screen stream…", 28f, 92f, small)
+            c.drawText("On Windows: start the USB receiver, then click Start screen video.", 28f, 122f, small)
         }
-        // Stroke paths are stored relative to the white board, so translate
-        // the drawing canvas to the board origin before rendering them.
-        c.save()
-        c.clipRect(rect)
-        c.translate(margin, canvasTop)
-        for (stroke in strokes) c.drawPath(stroke.path, stroke.paint)
-        c.restore()
-        // Hover cursor uses raw view coordinates, so draw it after restoring.
-        if (hover && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            val cursor = Paint(3).apply { color = Color.rgb(0, 130, 220); style = Paint.Style.STROKE; strokeWidth = 2f }
+        val overlay = Paint(3).apply { color = 0xB8000000.toInt() }
+        c.drawRoundRect(RectF(12f, 12f, 340f, 84f), 12f, 12f, overlay)
+        val white = Paint(3).apply { color = Color.WHITE; textSize = 15f; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+        val muted = Paint(3).apply { color = Color.LTGRAY; textSize = 12f }
+        c.drawText("USB VIDEO TEST", 24f, 35f, white)
+        c.drawText(if (frame != null) "VIDEO: RECEIVING" else "VIDEO: WAITING", 24f, 55f, muted)
+        c.drawText("PEN: $tool  •  pressure %.2f  •  events $eventCount".format(pressure), 24f, 72f, muted)
+        if (hover) {
+            val cursor = Paint(3).apply { color = Color.CYAN; style = Paint.Style.STROKE; strokeWidth = 2f }
             c.drawCircle(x, y, 9f, cursor)
         }
-        c.drawRoundRect(rect, 12f, 12f, border)
     }
 }
 private object PenLinkHolder { var client: PenLinkClient? = null }
