@@ -41,7 +41,7 @@ jobs:
           retention-days: 14
 
   windows-host:
-    name: Build Windows Companion
+    name: Build Windows Companion and bundle ADB
     runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v4
@@ -55,106 +55,27 @@ jobs:
       - name: Build Windows executable
         working-directory: windows-host
         run: pyinstaller --noconfirm --clean --onefile --windowed --name USBPenDisplayHost main.py
+      - name: Bundle Android Platform Tools
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "platform-tools.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "platform-tools"
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          New-Item -ItemType Directory -Force -Path "windows-host/dist/platform-tools" | Out-Null
+          Copy-Item "$extract/platform-tools/*" "windows-host/dist/platform-tools/" -Recurse -Force
+          if (-not (Test-Path "windows-host/dist/platform-tools/adb.exe")) { throw "ADB was not included in the Platform Tools archive." }
       - uses: actions/upload-artifact@v4
         with:
           name: milestone4-windows-host
-          path: windows-host/dist/USBPenDisplayHost.exe
-          if-no-files-found: error
-          retention-days: 14
-
-  iddcx-driver:
-    name: Build Microsoft IddCx virtual display sample
-    runs-on: windows-2025-vs2026
-    steps:
-      - uses: actions/checkout@v4
-      - name: Checkout Microsoft driver sample
-        shell: pwsh
-        run: |
-          git clone --depth 1 https://github.com/microsoft/Windows-driver-samples.git _driver_samples
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
-      - name: Configure one virtual monitor and Windows 10 1903+ INF target
-        shell: pwsh
-        run: |
-          $driverRoot = "_driver_samples/video/IndirectDisplay/IddSampleDriver"
-          $source = Join-Path $driverRoot "Driver.cpp"
-          $driverText = Get-Content $source -Raw
-          $driverText = $driverText.Replace("IDD_SAMPLE_MONITOR_COUNT = 3", "IDD_SAMPLE_MONITOR_COUNT = 1")
-          Set-Content -Path $source -Value $driverText -Encoding utf8
-          $inf = Join-Path $driverRoot "IddSampleDriver.inf"
-          $infText = Get-Content $inf -Raw
-          $infText = $infText.Replace("NT$ARCH$.10.0...22000", "NT$ARCH$.10.0...18362")
-          Set-Content -Path $inf -Value $infText -Encoding ascii
-      - name: Restore x64 Windows SDK and WDK NuGet packages
-        shell: pwsh
-        run: |
-          @'
-          <?xml version="1.0" encoding="utf-8"?>
-          <packages>
-            <package id="Microsoft.Windows.WDK.x64" version="10.0.28000.2526" targetFramework="native" />
-            <package id="Microsoft.Windows.SDK.CPP.x64" version="10.0.28000.2526" targetFramework="native" />
-          </packages>
-          '@ | Set-Content "_driver_samples/packages.config" -Encoding utf8
-          nuget restore "_driver_samples/packages.config" -PackagesDirectory "_driver_samples/packages"
-          if ($LASTEXITCODE -ne 0) { throw "WDK NuGet restore failed." }
-      - name: Install matching Windows SDK
-        shell: pwsh
-        run: |
-          winget install --id Microsoft.WindowsSDK.10.0.28000 --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-          if ($LASTEXITCODE -ne 0) { throw "Windows SDK 10.0.28000 installation failed." }
-      - name: Build IddCx sample using Microsoft's build orchestrator
-        shell: pwsh
-        run: |
-          $env:WindowsTargetPlatformVersion = "10.0.28000.0"
-          Push-Location "_driver_samples"
-          & ".\\Build-Samples.ps1" -Samples "video.indirectdisplay" -Configurations "Release" -Platforms "x64" -RunMode "NuGet" -NtTargetVersion "10.0.28000" -ThrottleLimit 1
-          $buildExitCode = $LASTEXITCODE
-          Pop-Location
-          if ($buildExitCode -ne 0) { throw "IddCx sample build failed." }
-      - name: Collect driver package, sample app and source
-        shell: pwsh
-        run: |
-          $out = Join-Path $PWD "driver-output"
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          $driverRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay/IddSampleDriver"
-          $appRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay"
-
-          $cat = Get-ChildItem $driverRoot -Recurse -Filter "IddSampleDriver.cat" | Select-Object -First 1
-          if (-not $cat) { throw "The IddCx build did not produce IddSampleDriver.cat." }
-          $packageDir = $cat.Directory.FullName
-          foreach ($name in @("IddSampleDriver.cat", "IddSampleDriver.inf", "IddSampleDriver.dll")) {
-            $item = Join-Path $packageDir $name
-            if (-not (Test-Path $item)) { throw "Expected driver package file missing: $item" }
-            Copy-Item $item $out
-          }
-
-          $cert = Get-ChildItem $driverRoot -Recurse -Filter "IddSampleDriver.cer" | Select-Object -First 1
-          if ($cert) { Copy-Item $cert.FullName (Join-Path $out "IddSampleDriver.cer") }
-
-          $app = Get-ChildItem $appRoot -Recurse -Filter "IddSampleApp.exe" |
-            Where-Object { $_.FullName -match "x64\\Release" } | Select-Object -First 1
-          if (-not $app) { throw "IddSampleApp.exe was not produced." }
-          Copy-Item $app.FullName (Join-Path $out "IddSampleApp.exe")
-
-          Copy-Item "windows-host/driver/*.ps1" $out
-          Copy-Item "windows-host/driver/README.txt" $out
-          $sourceOut = Join-Path $out "Microsoft-IddCx-Sample-Source"
-          Copy-Item "_driver_samples/video/IndirectDisplay" $sourceOut -Recurse
-          if (Test-Path "_driver_samples/LICENSE") {
-            Copy-Item "_driver_samples/LICENSE" (Join-Path $out "Microsoft-Windows-driver-samples-LICENSE")
-          }
-          Get-ChildItem $out -Recurse | Select-Object FullName,Length | Format-Table -AutoSize
-      - uses: actions/upload-artifact@v4
-        with:
-          name: milestone4-iddcx-driver
-          path: driver-output/**
+          path: windows-host/dist/**
           if-no-files-found: error
           retention-days: 14
 
   package:
     name: Assemble Milestone 4 ZIP
     runs-on: ubuntu-latest
-    needs: [android, windows-host, iddcx-driver]
+    needs: [android, windows-host]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -165,40 +86,47 @@ jobs:
         with:
           name: milestone4-windows-host
           path: bundle/Windows
-      - uses: actions/download-artifact@v4
-        with:
-          name: milestone4-iddcx-driver
-          path: bundle/Windows/Virtual-Display-Driver
-      - name: Add installation guide and create ZIP
+      - name: Add virtual display setup helper and create ZIP
         run: |
+          mkdir -p bundle/Windows/Virtual-Display-Driver
+          cp windows-host/driver/setup-virtual-display-driver.ps1 bundle/Windows/Virtual-Display-Driver/
+          cp windows-host/driver/README.txt bundle/Windows/Virtual-Display-Driver/
           cat > bundle/README-MILESTONE-4.txt <<'EOF'
-          USB PEN DISPLAY - MILESTONE 4 DEVELOPMENT PREVIEW
+          USB PEN DISPLAY - MILESTONE 4 DEVELOPMENT BUILD
 
           CONTENTS
-          - Android/app-debug.apk: tablet-side app (USB video receiver + stylus telemetry sender)
-          - Windows/USBPenDisplayHost.exe: PC companion (pen telemetry + selectable Windows display capture)
-          - Windows/Virtual-Display-Driver: Microsoft IddCx sample driver package, helper app, scripts and source
+          - Android/app-debug.apk: Lenovo Tab P12 app (screen receiver + stylus telemetry sender)
+          - Windows/USBPenDisplayHost.exe: PC companion (screen capture + pen pressure diagnostics)
+          - Windows/platform-tools/: bundled ADB tools; no separate ADB download is needed
+          - Windows/Virtual-Display-Driver/: setup helper and instructions for the existing signed Virtual Display Driver
 
-          FIRST-TIME DRIVER SETUP (DEVELOPMENT TEST DRIVER)
-          1. Read Virtual-Display-Driver/README.txt completely.
-          2. Windows driver test-signing mode is required for a test-signed development driver.
-          3. If you choose to enable it, run enable-test-mode.ps1 as Administrator and reboot.
-          4. Run install-driver.ps1 as Administrator.
-          5. Run IddSampleApp.exe and leave it open. This sample app creates the software device; closing it removes the virtual monitor.
-          6. Open Windows Settings > System > Display and choose Extend these displays.
-          7. Connect the tablet over USB, enable USB debugging and accept the authorization prompt.
-          8. Run USBPenDisplayHost.exe, click Refresh tablet, start the USB receiver, then open the Android APK.
-          9. Click Refresh displays, select the virtual display, and click Start screen video.
+          SET UP THE VIRTUAL SECOND MONITOR (ONE TIME)
+          1. Open Windows/Virtual-Display-Driver/README.txt.
+          2. Run PowerShell as Administrator.
+          3. Run setup-virtual-display-driver.ps1. It uses the official VirtualDrivers WinGet package.
+          4. Open Virtual Driver Control and click Install if it has not already installed the driver.
+          5. Open Settings > System > Display. Choose Extend these displays and arrange the virtual display.
+          6. Set the virtual display to a tablet-friendly resolution such as 1920x1200 or 1600x1000.
 
-          IMPORTANT LIMITATIONS
-          - This is a development milestone, not a production-ready signed driver.
-          - The IddCx driver is Microsoft's sample, not yet our finished custom transport driver.
-          - The PC companion captures the selected Windows display and streams it over the existing ADB USB tunnel.
-          - The tablet's stylus telemetry path remains separate and continues to use TCP port 27183.
-          - The video channel continues to use TCP port 27184.
-          - Windows may block test-signing mode when Secure Boot or policy restrictions are active.
-          - Do not disable Secure Boot unless you understand the security consequences.
-          - This build does not yet inject the tablet stylus into Windows Ink as a native Windows pen.
+          CONNECT THE TABLET
+          1. Connect the Lenovo tablet with a USB data cable.
+          2. Enable Developer options > USB debugging on the tablet and accept the authorization prompt.
+          3. Run USBPenDisplayHost.exe.
+          4. Click Refresh tablet (manual refresh only).
+          5. Click Start USB receiver.
+          6. Install and open Android/app-debug.apk on the tablet.
+          7. In the PC app click Refresh displays, select the Virtual Display Driver monitor, then click Start screen video.
+          8. Drag a window onto the virtual monitor in Windows. It should appear on the tablet.
+
+          IMPORTANT
+          - The existing Virtual Display Driver is installed separately by the included helper from its official WinGet source. The third-party driver binaries are not repackaged in this ZIP.
+          - Virtual display driver installation requires administrator approval.
+          - Windows 10/11 compatibility is provided by the third-party driver's current release; check its release notes for system-specific requirements.
+          - The PC app captures whichever display you select. It does not silently switch displays.
+          - USB video uses TCP port 27184 through ADB reverse.
+          - Stylus telemetry uses TCP port 27183 and retains pressure, tilt, orientation, hover and button data.
+          - This milestone displays and diagnoses stylus telemetry on the PC; it does not yet inject the tablet stylus as a native Windows Ink pen.
+          - This is a development build. The third-party virtual display driver is maintained by VirtualDrivers, not by this project.
           EOF
           cd bundle
           zip -r ../Milestone-4-Build.zip .
