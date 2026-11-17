@@ -159,9 +159,13 @@ private class PenDiagnosticView(context: android.content.Context) : View(context
         hover = e.actionMasked in listOf(MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_HOVER_EXIT)
         contact = e.actionMasked in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP)
         received = true
-        PenLinkHolder.client?.send(
-            "{\"type\":\"pen\",\"tool\":\"$tool\",\"device\":\"$device\",\"action\":\"$eventName\",\"x\":$x,\"y\":$y,\"pressure\":$pressure,\"tilt\":$tilt,\"orientation\":$orientation,\"buttons\":$buttons,\"hover\":$hover,\"contact\":$contact,\"eventTime\":${e.eventTime}}"
-        )
+        val payload = org.json.JSONObject().apply {
+            put("type", "pen"); put("tool", tool); put("device", device); put("action", eventName)
+            put("x", x.toDouble()); put("y", y.toDouble()); put("pressure", pressure.toDouble())
+            put("tilt", tilt.toDouble()); put("orientation", orientation.toDouble())
+            put("buttons", buttons); put("hover", hover); put("contact", contact); put("eventTime", e.eventTime)
+        }
+        PenLinkHolder.client?.send(payload.toString())
         invalidate()
     }
 
