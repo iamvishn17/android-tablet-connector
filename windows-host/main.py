@@ -39,7 +39,7 @@ class Host:
         self.last_pressure = 0.0
         self.last_point = None
         self.last_pointer = None
-        self.video_streamer = VideoStreamer(self.write)
+        self.video_streamer = VideoStreamer(lambda msg: self.root.after(0, lambda: self.write(msg)))
 
         root.title("USB Pen Display — Pressure Canvas")
         root.geometry("1050x850")
