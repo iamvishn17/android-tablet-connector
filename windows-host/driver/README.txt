@@ -1,29 +1,32 @@
-MILESTONE 4 - VIRTUAL DISPLAY DRIVER (DEVELOPMENT PREVIEW)
+VIRTUAL DISPLAY DRIVER SETUP
 
-This folder contains scripts for the Microsoft IddCx sample driver package built for this project.
-The driver is a development/test build, not a production-signed release.
+This project uses the existing Virtual Display Driver maintained by VirtualDrivers.
+Official project: https://github.com/VirtualDrivers/Virtual-Display-Driver
+Official releases: https://github.com/VirtualDrivers/Virtual-Display-Driver/releases
+WinGet package: VirtualDrivers.Virtual-Display-Driver
 
-INSTALL ORDER
-1. Read the project README and Microsoft IddCx sample documentation.
-2. Run enable-test-mode.ps1 as Administrator only if you accept the security implications.
-3. Restart Windows.
-4. Run install-driver.ps1 as Administrator.
-5. Run IddSampleApp.exe and leave it open. It creates the sample software device; closing it removes the virtual display.
-6. Open Windows Settings > System > Display and choose Extend these displays.
-7. Open USBPenDisplayHost.exe, click Refresh displays, select the virtual display, then click Start screen video.
+INSTALL
+1. Open PowerShell as Administrator.
+2. Run setup-virtual-display-driver.ps1 from this folder.
+3. If Virtual Driver Control opens or is installed, launch it and click Install.
+4. Open Windows Settings > System > Display.
+5. Choose "Extend these displays" and arrange the virtual monitor.
+6. Select a tablet-friendly resolution (for example 1920x1200 or 1600x1000).
 
-IMPORTANT
-- The Microsoft sample is only a starting point. It enumerates a virtual display and processes the OS swap chain, but it does not yet send frames to Android itself.
-- Our PC companion captures the selected Windows display and sends it over the existing ADB USB tunnel.
-- Test-signing mode may be blocked by Secure Boot or organization policy.
-- This is not a production driver and must not be distributed as a signed commercial driver.
-- Windows 10/11 compatibility depends on the installed Windows build and available IddCx/WDK support.
-- Keep the original Microsoft copyright and license notices with the sample source.
+CONNECT AND STREAM
+1. Connect the tablet with a USB data cable and enable USB debugging.
+2. Accept the USB debugging authorization prompt on the tablet.
+3. Start USBPenDisplayHost.exe.
+4. Click Refresh tablet, then Start USB receiver.
+5. Install and open the Android APK.
+6. Click Refresh displays, select the virtual monitor, then Start screen video.
 
-CI note: only the x64 WDK package is restored, and the driver build is driven by Microsoft's Build-Samples.ps1 script.
-
-The build script runs from the Microsoft sample repository root so its NuGet package discovery resolves correctly.
-
-The CI build explicitly restores and targets the matching Windows SDK 28000 alongside the WDK.
-
-The CI worker installs the matching Windows SDK 28000 before compiling the virtual display sample.
+NOTES
+- This is a third-party signed driver; it is not compiled by this project.
+- The setup script uses the official WinGet package. If WinGet is unavailable, it opens the official releases page.
+- Review upstream release notes and documentation before installation.
+- Driver installation requires administrator approval.
+- If display problems occur, use Virtual Driver Control to uninstall or disable the virtual display driver.
+- The PC companion does not install or change drivers automatically when it starts.
+- The PC companion captures only the display selected in its display dropdown.
+- Stylus pressure/tilt/hover telemetry remains on the separate USB data channel. Native Windows Ink injection is not part of this milestone.
