@@ -34,7 +34,6 @@ class Host:
         self.device = None
         self.busy = False
         self.receiver_started = False
-        self.video_requested = False
         self.server = None
         self.server_thread = None
         self.client_socket = None
@@ -365,7 +364,6 @@ class Host:
         try:
             if self.client_socket:
                 self.client_socket.close()
-            self.video_streamer.stop(self.adb, self.device)
             if self.server:
                 self.server.close()
             if self.adb and self.device:
