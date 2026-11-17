@@ -1,0 +1,32 @@
+name: Build Windows Host
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "windows-host/**"
+      - ".github/workflows/windows-build.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r windows-host/requirements.txt
+      - name: Build Windows executable
+        working-directory: windows-host
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name USBPenDisplayHost main.py
+      - name: Upload Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: USB-Pen-Display-Windows
+          path: windows-host/dist/USBPenDisplayHost.exe
+          if-no-files-found: error
+          retention-days: 14
