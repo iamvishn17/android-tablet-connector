@@ -1,5 +1,4 @@
 import json, os, platform, queue, shutil, socket, subprocess, sys, threading, tkinter as tk
-from video_stream import VideoStreamer, list_monitors
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -47,9 +46,8 @@ class Host:
         self.last_pressure = 0.0
         self.last_point = None
         self.last_pointer = None
-        self.video_streamer = VideoStreamer(lambda msg: self.root.after(0, lambda: self.write(msg)))
 
-        root.title("USB Pen Display — Video Stream Test")
+        root.title("USB Pen Display — Pen Pressure Diagnostics")
         root.geometry("1050x850")
         root.minsize(850, 700)
         style = ttk.Style()
@@ -62,8 +60,8 @@ class Host:
 
         outer = ttk.Frame(root, padding=16)
         outer.pack(fill="both", expand=True)
-        ttk.Label(outer, text="USB SCREEN VIDEO TEST", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(outer, text="Stream this PC screen to the tablet over USB. Pen pressure telemetry runs alongside the video test.",
+        ttk.Label(outer, text="USB PEN PRESSURE DIAGNOSTICS", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(outer, text="Receives our original pen-pressure telemetry alongside the AnyDisplay display session.",
                   style="Muted.TLabel").pack(anchor="w", pady=(3, 10))
 
         connection = ttk.LabelFrame(outer, text=" USB CONNECTION ", padding=10)
@@ -77,12 +75,6 @@ class Host:
         self.refresh_btn = ttk.Button(buttons, text="Refresh tablet", command=self.refresh)
         self.refresh_btn.pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text="Start USB receiver", command=self.start_link).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Start screen video", command=self.start_video).pack(side="left", padx=6)
-        self.monitor_var = tk.StringVar(value="1 - Primary display")
-        self.monitor_combo = ttk.Combobox(buttons, textvariable=self.monitor_var, state="readonly", width=27)
-        self.monitor_combo.pack(side="left", padx=(10, 4))
-        ttk.Button(buttons, text="Refresh displays", command=self.refresh_displays).pack(side="left", padx=4)
-        self.video_monitor_map = {"1 - Primary display": 1}
         self.launch_btn = ttk.Button(buttons, text="Open tablet app", command=self.launch, state="disabled")
         self.launch_btn.pack(side="left", padx=6)
         self.install_btn = ttk.Button(buttons, text="Install / update APK", command=self.install, state="disabled")
@@ -108,7 +100,7 @@ class Host:
         self.canvas.pack(fill="both", expand=True)
         footer = ttk.Frame(drawing)
         footer.pack(fill="x", pady=(6, 0))
-        ttk.Label(footer, text="Optional: tablet stylus input is mirrored here while video is streaming.").pack(side="left")
+        ttk.Label(footer, text="AnyDisplay handles the screen stream; this window shows the original pressure telemetry.").pack(side="left")
         ttk.Button(footer, text="Clear PC canvas", command=self.clear_canvas).pack(side="right")
 
         log_frame = ttk.LabelFrame(outer, text=" DIAGNOSTIC LOG ", padding=6)
@@ -117,7 +109,6 @@ class Host:
                            font=("Consolas", 9), state="disabled")
         self.log.pack(fill="x")
         self.write("Ready. Start the receiver, then open the tablet app.")
-        self.refresh_displays()
         root.after(30, self.process_messages)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -219,34 +210,6 @@ class Host:
             except Exception as exc:
                 self.root.after(0, lambda e=str(exc): messagebox.showerror("USB Pen Display", e))
         threading.Thread(target=work, daemon=True).start()
-
-    def refresh_displays(self):
-        """List Windows displays. This is separate from USB refresh and is user-triggered."""
-        try:
-            monitors = list_monitors()
-            self.video_monitor_map = {}
-            labels = []
-            for index, width, height, left, top in monitors:
-                label = f"{index} - {width}x{height} at ({left},{top})"
-                self.video_monitor_map[label] = index
-                labels.append(label)
-            if not labels:
-                labels = ["1 - Primary display"]
-                self.video_monitor_map = {labels[0]: 1}
-            self.monitor_combo["values"] = labels
-            preferred = next((x for x in labels if x.startswith("1 - ")), labels[0])
-            self.monitor_var.set(preferred)
-            self.write(f"Found {len(labels)} display(s). Select the virtual tablet display here when the IddCx monitor is installed.")
-        except Exception as exc:
-            self.write("Could not enumerate displays: " + str(exc))
-
-    def start_video(self):
-        if not self.adb or not self.device:
-            messagebox.showwarning("USB Pen Display", "Connect and authorize the tablet first.")
-            return
-        self.video_requested = True
-        monitor_index = self.video_monitor_map.get(self.monitor_var.get(), 1)
-        self.video_streamer.start(self.adb, self.device, monitor_index=monitor_index)
 
     def accept_loop(self):
         while self.server:
