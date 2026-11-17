@@ -62,3 +62,5 @@ Milestone 4 build workflow now restores Microsoft's WDK NuGet packages before co
 Milestone 4 driver CI uses Microsoft's WDK build orchestrator and builds a single virtual monitor for the preview package.
 
 The CI bundle builds only the x64 driver package needed for typical Intel/AMD Windows PCs.
+
+The WDK restore step uses the standard packages.config filename required by NuGet.
