@@ -102,7 +102,7 @@ jobs:
           $out = Join-Path $PWD "driver-output"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           $driverRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay/IddSampleDriver"
-          $appRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay/IddSampleApp"
+          $appRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay"
 
           $cat = Get-ChildItem $driverRoot -Recurse -Filter "IddSampleDriver.cat" | Select-Object -First 1
           if (-not $cat) { throw "The IddCx build did not produce IddSampleDriver.cat." }
