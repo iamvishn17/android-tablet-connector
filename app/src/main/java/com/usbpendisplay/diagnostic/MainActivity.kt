@@ -7,7 +7,9 @@ import android.view.View
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
+import android.graphics.Path
+import android.graphics.RectF
+import org.json.JSONObject
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
@@ -16,32 +18,18 @@ import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
-    private lateinit var panel: PenDiagnosticView
+    private lateinit var panel: PenCanvasView
     private lateinit var link: PenLinkClient
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        link = PenLinkClient { connected ->
-            runOnUiThread { if (::panel.isInitialized) panel.setPcLink(connected) }
-        }
-        PenLinkHolder.client = link
-        panel = PenDiagnosticView(this)
         window.statusBarColor = Color.rgb(12, 17, 27)
         window.navigationBarColor = Color.rgb(12, 17, 27)
+        link = PenLinkClient { connected -> runOnUiThread { if (::panel.isInitialized) panel.setPcLink(connected) } }
+        PenLinkHolder.client = link
+        panel = PenCanvasView(this)
         setContentView(panel)
         link.start()
     }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        panel.updateFrom(event)
-        return true
-    }
-
-    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        panel.updateFrom(event)
-        return true
-    }
-
     override fun onDestroy() {
         if (::link.isInitialized) link.stop()
         PenLinkHolder.client = null
@@ -49,160 +37,143 @@ class MainActivity : Activity() {
     }
 }
 
-/** Sends newline-delimited JSON over the ADB-reversed USB TCP tunnel. */
 private class PenLinkClient(private val onConnection: (Boolean) -> Unit) {
-    private val queue = LinkedBlockingQueue<String>(512)
+    private val queue = LinkedBlockingQueue<String>(2048)
     @Volatile private var running = false
     private var worker: Thread? = null
-
     fun start() {
         if (running) return
         running = true
         worker = thread(name = "PenUsbLink", isDaemon = true) {
-            var reported = false
             while (running) {
                 var socket: Socket? = null
                 try {
                     socket = Socket()
                     socket.tcpNoDelay = true
-                    socket.connect(InetSocketAddress("127.0.0.1", 27183), 1200)
+                    socket.connect(InetSocketAddress("127.0.0.1", 27183), 1500)
                     val writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
-                    if (!reported) { reported = true; onConnection(true) }
-                    writer.write("{\"type\":\"hello\",\"protocol\":1}")
+                    writer.write(JSONObject().put("type", "hello").put("protocol", 2).toString())
                     writer.newLine()
                     writer.flush()
+                    onConnection(true)
                     while (running && !socket.isClosed) {
-                        val message = queue.poll(300, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        val message = queue.poll(250, java.util.concurrent.TimeUnit.MILLISECONDS)
                         if (message != null) {
-                            writer.write(message)
-                            writer.newLine()
-                            writer.flush()
+                            writer.write(message); writer.newLine(); writer.flush()
                         }
                     }
                 } catch (_: Exception) {
-                    if (reported) { reported = false; onConnection(false) }
-                    try { Thread.sleep(900) } catch (_: InterruptedException) { }
-                } finally {
-                    try { socket?.close() } catch (_: Exception) { }
-                }
+                    onConnection(false)
+                    try { Thread.sleep(800) } catch (_: InterruptedException) { }
+                } finally { try { socket?.close() } catch (_: Exception) { } }
             }
-            if (reported) onConnection(false)
+            onConnection(false)
         }
     }
-
     fun send(message: String) {
         if (!running) return
-        if (!queue.offer(message)) {
-            queue.poll()
-            queue.offer(message)
-        }
+        if (!queue.offer(message)) { queue.poll(); queue.offer(message) }
     }
-
-    fun stop() {
-        running = false
-        worker?.interrupt()
-        worker = null
-        queue.clear()
-    }
+    fun stop() { running = false; worker?.interrupt(); worker = null; queue.clear() }
 }
 
-private class PenDiagnosticView(context: android.content.Context) : View(context) {
-    init { isFocusable = true; isFocusableInTouchMode = true }
+private data class LocalStroke(val path: Path, val paint: Paint)
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        updateFrom(event)
-        return true
-    }
-
-    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
-        updateFrom(event)
-        return true
-    }
-    private val heading = Paint(3).apply { color = Color.WHITE; textSize = 27f; typeface = Typeface.DEFAULT_BOLD }
-    private val body = Paint(3).apply { color = Color.rgb(210, 220, 235); textSize = 17f }
-    private val muted = Paint(3).apply { color = Color.rgb(145, 160, 180); textSize = 13f }
-    private val line = Paint(3).apply { color = Color.rgb(55, 70, 90); strokeWidth = 1.5f }
-    private val dot = Paint(3).apply { color = Color.rgb(70, 190, 255) }
-    private var tool = "Waiting for stylus..."
-    private var device = "—"
-    private var eventName = "No input yet"
+private class PenCanvasView(context: android.content.Context) : View(context) {
+    private val heading = Paint(3).apply { color = Color.WHITE; textSize = 25f; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+    private val label = Paint(3).apply { color = Color.rgb(160, 177, 198); textSize = 14f }
+    private val value = Paint(3).apply { color = Color.WHITE; textSize = 17f }
+    private val board = Paint(3).apply { color = Color.rgb(250, 251, 253) }
+    private val border = Paint(3).apply { color = Color.rgb(75, 94, 119); style = Paint.Style.STROKE; strokeWidth = 2f }
+    private val strokes = mutableListOf<LocalStroke>()
+    private var activeStroke: LocalStroke? = null
+    private var pcConnected = false
+    private var eventCount = 0L
+    private var tool = "Move stylus on the white canvas"
+    private var action = "Waiting"
+    private var pressure = 0f
+    private var maxPressure = 0f
     private var x = 0f
     private var y = 0f
-    private var pressure = 0f
-    private var tilt = 0f
-    private var orientation = 0f
-    private var buttons = 0
     private var hover = false
-    private var contact = false
-    private var received = false
-    private var pcLink = false
+    private var buttons = 0
+    private val margin = 24f
+    private val canvasTop = 154f
+    private val bottom = 24f
+    fun setPcLink(connected: Boolean) { pcConnected = connected; invalidate() }
+    override fun onTouchEvent(event: MotionEvent): Boolean { handle(event); return true }
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean { handle(event); return true }
 
-    fun setPcLink(connected: Boolean) {
-        pcLink = connected
-        invalidate()
-    }
-
-    fun updateFrom(e: MotionEvent) {
+    private fun handle(e: MotionEvent) {
+        if (e.pointerCount <= 0) return
         val i = e.actionIndex.coerceIn(0, e.pointerCount - 1)
-        tool = when (e.getToolType(i)) {
+        val type = e.getToolType(i)
+        val toolName = when (type) {
             MotionEvent.TOOL_TYPE_STYLUS -> "STYLUS"
             MotionEvent.TOOL_TYPE_ERASER -> "ERASER"
             MotionEvent.TOOL_TYPE_FINGER -> "FINGER"
             MotionEvent.TOOL_TYPE_MOUSE -> "MOUSE"
             else -> "UNKNOWN"
         }
-        device = e.device?.name ?: "Device #${e.deviceId}"
-        eventName = MotionEvent.actionToString(e.action)
-        x = e.getX(i); y = e.getY(i); pressure = e.getPressure(i)
-        tilt = e.getAxisValue(MotionEvent.AXIS_TILT, i)
-        orientation = e.getOrientation(i); buttons = e.buttonState
-        hover = e.actionMasked in listOf(MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_HOVER_EXIT)
-        contact = e.actionMasked in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP)
-        received = true
-        val payload = org.json.JSONObject().apply {
-            put("type", "pen"); put("tool", tool); put("device", device); put("action", eventName)
-            put("x", x.toDouble()); put("y", y.toDouble()); put("pressure", pressure.toDouble())
-            put("tilt", tilt.toDouble()); put("orientation", orientation.toDouble())
-            put("buttons", buttons); put("hover", hover); put("contact", contact); put("eventTime", e.eventTime)
+        val actionName = MotionEvent.actionToString(e.actionMasked)
+        x = e.getX(i); y = e.getY(i); pressure = e.getPressure(i).coerceIn(0f, 1f)
+        maxPressure = maxOf(maxPressure, pressure)
+        tool = toolName; action = actionName; buttons = e.buttonState
+        hover = e.actionMasked == MotionEvent.ACTION_HOVER_ENTER || e.actionMasked == MotionEvent.ACTION_HOVER_MOVE || e.actionMasked == MotionEvent.ACTION_HOVER_EXIT
+        eventCount++
+        val cw = (width - margin * 2).coerceAtLeast(1f)
+        val ch = (height - canvasTop - bottom).coerceAtLeast(1f)
+        val cx = (x - margin).coerceIn(0f, cw)
+        val cy = (y - canvasTop).coerceIn(0f, ch)
+        val drawTool = type == MotionEvent.TOOL_TYPE_STYLUS || type == MotionEvent.TOOL_TYPE_ERASER || type == MotionEvent.TOOL_TYPE_FINGER
+        if (drawTool && (e.actionMasked == MotionEvent.ACTION_DOWN || e.actionMasked == MotionEvent.ACTION_POINTER_DOWN)) {
+            val paint = Paint(3).apply {
+                color = if (type == MotionEvent.TOOL_TYPE_ERASER) Color.WHITE else Color.rgb(20, 105, 220)
+                style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+                strokeWidth = 2f + pressure * 16f
+            }
+            val path = Path().apply { moveTo(cx, cy) }
+            activeStroke = LocalStroke(path, paint); strokes.add(activeStroke!!)
+        } else if (drawTool && e.actionMasked == MotionEvent.ACTION_MOVE && activeStroke != null) {
+            activeStroke!!.path.lineTo(cx, cy)
+            activeStroke!!.paint.strokeWidth = 2f + pressure * 16f
+        } else if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_POINTER_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+            activeStroke = null
         }
-        PenLinkHolder.client?.send(payload.toString())
+        val packet = JSONObject().apply {
+            put("type", "pen"); put("protocol", 2); put("tool", toolName); put("action", actionName)
+            put("pointerId", e.getPointerId(i))
+            put("x", x.toDouble()); put("y", y.toDouble())
+            put("canvasX", cx.toDouble()); put("canvasY", cy.toDouble())
+            put("canvasWidth", cw.toDouble()); put("canvasHeight", ch.toDouble())
+            put("pressure", e.getPressure(i).toDouble())
+            put("tilt", e.getAxisValue(MotionEvent.AXIS_TILT, i).toDouble())
+            put("orientation", e.getOrientation(i).toDouble())
+            put("buttons", buttons); put("hover", hover)
+            put("contact", e.actionMasked == MotionEvent.ACTION_DOWN || e.actionMasked == MotionEvent.ACTION_MOVE || e.actionMasked == MotionEvent.ACTION_POINTER_DOWN)
+            put("eventTime", e.eventTime)
+        }
+        PenLinkHolder.client?.send(packet.toString())
         invalidate()
     }
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        val p = 28f
-        var yText = 55f
-        c.drawText("USB PEN DISPLAY", p, yText, heading); yText += 32f
-        c.drawText("Build 0.2.0  •  USB stylus link test", p, yText, muted); yText += 28f
-        c.drawLine(p, yText, width - p, yText, line); yText += 36f
-        val state = if (!received) "WAITING" else if (contact) "CONTACT" else if (hover) "HOVER" else "INPUT"
-        c.drawText("INPUT STATUS: $state", p, yText, heading); yText += 34f
-        c.drawText("PC USB LINK: ${if (pcLink) "CONNECTED" else "WAITING FOR PC"}", p, yText, if (pcLink) body else muted); yText += 34f
-        val rows = listOf(
-            "Tool type" to tool, "Input device" to device, "Event" to eventName,
-            "X position" to if (received) "%.1f px".format(x) else "—",
-            "Y position" to if (received) "%.1f px".format(y) else "—",
-            "Pressure" to "%.4f (Android raw value)".format(pressure),
-            "Tilt" to "%.4f rad / %.1f°".format(tilt, Math.toDegrees(tilt.toDouble())),
-            "Orientation" to "%.4f rad".format(orientation), "Button state" to buttons.toString()
-        )
-        for ((label, value) in rows) {
-            c.drawText(label, p, yText, muted)
-            c.drawText(value, p + 145f, yText, body)
-            yText += 29f
+        c.drawColor(Color.rgb(12, 17, 27))
+        c.drawText("USB PEN PRESSURE TEST", margin, 38f, heading)
+        c.drawText("Draw on the white canvas. Stroke thickness follows pressure.", margin, 65f, label)
+        c.drawText("PC LINK: " + (if (pcConnected) "CONNECTED" else "WAITING"), margin, 100f, value)
+        c.drawText("INPUT: $tool | $action | events: $eventCount", margin, 126f, label)
+        c.drawText("Pressure: %.3f   Maximum: %.3f   Buttons: %d".format(pressure, maxPressure, buttons), margin, 146f, label)
+        val rect = RectF(margin, canvasTop, width - margin, height - bottom)
+        c.drawRoundRect(rect, 12f, 12f, board)
+        c.save(); c.clipRect(rect)
+        for (stroke in strokes) c.drawPath(stroke.path, stroke.paint)
+        if (hover && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            val cursor = Paint(3).apply { color = Color.rgb(0, 130, 220); style = Paint.Style.STROKE; strokeWidth = 2f }
+            c.drawCircle(x, y, 9f, cursor)
         }
-        val top = yText + 8f
-        val bottom = height - 55f
-        if (bottom > top + 80f) {
-            c.drawLine(p, top, width - p, top, line)
-            c.drawText("DRAWING AREA — move the pen here", p, top + 27f, muted)
-            c.drawRect(p, top + 42f, width - p, bottom, line)
-            if (received) c.drawCircle(x.coerceIn(p, width - p), y.coerceIn(top + 42f, bottom), 7f + pressure.coerceIn(0f, 1f) * 12f, dot)
-        }
-        c.drawText("Pen events are sent to Windows when the USB link is active.", p, height - 22f, muted)
+        c.restore(); c.drawRoundRect(rect, 12f, 12f, border)
     }
 }
-
-/** A small holder lets the custom View enqueue events without blocking the UI thread. */
 private object PenLinkHolder { var client: PenLinkClient? = null }
