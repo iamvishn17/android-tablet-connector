@@ -85,10 +85,16 @@ jobs:
           $infText = Get-Content $inf -Raw
           $infText = $infText.Replace("NT$ARCH$.10.0...22000", "NT$ARCH$.10.0...18362")
           Set-Content -Path $inf -Value $infText -Encoding ascii
-      - name: Restore official Windows SDK and WDK NuGet packages
+      - name: Restore x64 Windows SDK and WDK NuGet packages
         shell: pwsh
         run: |
-          nuget restore "_driver_samples/packages.config" -PackagesDirectory "_driver_samples/packages"
+          @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <packages>
+            <package id="Microsoft.Windows.WDK.x64" version="10.0.28000.2526" targetFramework="native" />
+          </packages>
+          '@ | Set-Content "_driver_samples/packages-m4.config" -Encoding utf8
+          nuget restore "_driver_samples/packages-m4.config" -PackagesDirectory "_driver_samples/packages"
           if ($LASTEXITCODE -ne 0) { throw "WDK NuGet restore failed." }
       - name: Build IddCx sample using Microsoft's build orchestrator
         shell: pwsh
