@@ -145,6 +145,19 @@ class Receiver:
                 kind, payload = self.events.get_nowait()
                 if kind == "log":
                     self.write(payload)
+                elif kind == "worker_done":
+                    self.worker_busy = False
+                elif kind == "host_started":
+                    self.stream_value.configure(text="Host running — connecting")
+                    self.pen_value.configure(text="Native pen input enabled")
+                    self.stop_button.configure(state="normal")
+                elif kind == "setup_failed":
+                    self.worker_busy = False
+                    self.session_device = None
+                    self.stream_value.configure(text="Connection failed")
+                    self.pen_value.configure(text="Not active")
+                    self.main_status.configure(text="Could not start display sharing")
+                    self.detail.configure(text=payload)
                 elif kind == "host_exit":
                     code = payload
                     self.host_process = None
