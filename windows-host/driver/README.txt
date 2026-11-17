@@ -25,3 +25,5 @@ CI note: only the x64 WDK package is restored, and the driver build is driven by
 The build script runs from the Microsoft sample repository root so its NuGet package discovery resolves correctly.
 
 The CI build explicitly restores and targets the matching Windows SDK 28000 alongside the WDK.
+
+The CI worker installs the matching Windows SDK 28000 before compiling the virtual display sample.
