@@ -15,6 +15,17 @@ TARGET_FPS = 24
 JPEG_QUALITY = 65
 
 
+def list_monitors():
+    """Return real display outputs (excluding mss' virtual all-monitors entry)."""
+    with mss.mss() as capture:
+        return [
+            (index, int(item["width"]), int(item["height"]),
+             int(item["left"]), int(item["top"]))
+            for index, item in enumerate(capture.monitors)
+            if index > 0
+        ]
+
+
 class VideoStreamer:
     def __init__(self, log):
         self.log = log
@@ -23,7 +34,7 @@ class VideoStreamer:
         self.client = None
         self.thread = None
 
-    def start(self, adb, device):
+    def start(self, adb, device, monitor_index=1):
         if self.running:
             self.log("Video streamer is already running.")
             return
@@ -44,29 +55,31 @@ class VideoStreamer:
                 self.server = server
                 self.running = True
                 self.log(f"Video channel ready on USB port {VIDEO_PORT}; waiting for tablet.")
-                self.thread = threading.Thread(target=self._accept, daemon=True)
+                self.thread = threading.Thread(target=self._accept, args=(monitor_index,), daemon=True)
                 self.thread.start()
             except Exception as exc:
                 self.log("Could not start video channel: " + str(exc))
 
         threading.Thread(target=setup, daemon=True).start()
 
-    def _accept(self):
+    def _accept(self, monitor_index):
         while self.running and self.server:
             try:
                 conn, _ = self.server.accept()
                 self.client = conn
                 self.log("Tablet connected to video channel. Sending primary screen.")
-                threading.Thread(target=self._send_frames, args=(conn,), daemon=True).start()
+                threading.Thread(target=self._send_frames, args=(conn, monitor_index), daemon=True).start()
             except socket.timeout:
                 continue
             except OSError:
                 break
 
-    def _send_frames(self, conn):
+    def _send_frames(self, conn, monitor_index):
         try:
             with mss.mss() as capture:
-                monitor = capture.monitors[1]
+                if monitor_index <= 0 or monitor_index >= len(capture.monitors):
+                    monitor_index = 1
+                monitor = capture.monitors[monitor_index]
                 while self.running and conn is self.client:
                     started = time.perf_counter()
                     shot = capture.grab(monitor)
