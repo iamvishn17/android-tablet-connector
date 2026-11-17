@@ -55,3 +55,6 @@ Milestone 4 adds a selectable Windows display source to the PC companion and a c
 The driver is based on Microsoft's official IddCx sample and is not a production-signed driver. Review the driver setup notes in the Milestone 4 ZIP before enabling Windows test-signing mode.
 
 Build bundle: GitHub Actions → **Build Milestone 4 Bundle** → latest successful run → **Milestone-4-Build** artifact.
+
+
+Milestone 4 build workflow now restores Microsoft's WDK NuGet packages before compiling the IddCx sample.
