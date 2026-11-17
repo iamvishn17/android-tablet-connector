@@ -90,11 +90,10 @@ jobs:
         run: |
           nuget restore "_driver_samples/packages.config" -PackagesDirectory "_driver_samples/packages"
           if ($LASTEXITCODE -ne 0) { throw "WDK NuGet restore failed." }
-      - name: Build IddCx sample for x64
+      - name: Build IddCx sample using Microsoft's build orchestrator
         shell: pwsh
         run: |
-          $solution = "_driver_samples/video/IndirectDisplay/IddSampleDriver.sln"
-          msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /v:minimal
+          & "_driver_samples/Build-Samples.ps1" -Samples "video.indirectdisplay" -Configurations "Release" -Platforms "x64" -RunMode "NuGet" -NtTargetVersion "10.0.28000" -ThrottleLimit 1
           if ($LASTEXITCODE -ne 0) { throw "IddCx sample build failed." }
       - name: Collect driver package, sample app and source
         shell: pwsh
