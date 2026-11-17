@@ -1,8 +1,9 @@
-import os, platform, shutil, subprocess, threading, tkinter as tk
+import json, os, platform, shutil, socket, subprocess, threading, tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 APP_ID = "com.usbpendisplay.diagnostic"
+PORT = 27183
 
 def find_adb():
     found = shutil.which("adb") or shutil.which("adb.exe")
@@ -20,9 +21,12 @@ def find_adb():
 class Host:
     def __init__(self, root):
         self.root, self.adb, self.device, self.busy = root, None, None, False
+        self.server = None
+        self.server_thread = None
+        self.client_socket = None
         root.title("USB Pen Display")
-        root.geometry("720x510")
-        root.minsize(650, 470)
+        root.geometry("780x650")
+        root.minsize(700, 590)
         style = ttk.Style(); style.theme_use("clam")
         style.configure("TFrame", background="#101722")
         style.configure("TLabel", background="#101722", foreground="#e8eef7", font=("Segoe UI", 10))
@@ -31,21 +35,27 @@ class Host:
         style.configure("TButton", font=("Segoe UI", 10), padding=8)
         outer = ttk.Frame(root, padding=24); outer.pack(fill="both", expand=True)
         ttk.Label(outer, text="USB PEN DISPLAY", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(outer, text=f"Windows companion • {platform.system()} {platform.release()} • Build 0.2.0", style="Muted.TLabel").pack(anchor="w", pady=(4,20))
-        card = ttk.LabelFrame(outer, text=" TABLET CONNECTION ", padding=15); card.pack(fill="x")
+        ttk.Label(outer, text=f"Windows companion • {platform.system()} {platform.release()} • Build 0.3.0", style="Muted.TLabel").pack(anchor="w", pady=(4,16))
+        card = ttk.LabelFrame(outer, text=" TABLET CONNECTION ", padding=13); card.pack(fill="x")
         self.status = ttk.Label(card, text="Checking for Android Debug Bridge…", font=("Segoe UI",12,"bold")); self.status.pack(anchor="w")
-        self.detail = ttk.Label(card, text="Connect your Tab P12 using a USB data cable.", style="Muted.TLabel"); self.detail.pack(anchor="w", pady=8)
+        self.detail = ttk.Label(card, text="Connect your Tab P12 using a USB data cable.", style="Muted.TLabel"); self.detail.pack(anchor="w", pady=6)
         row = ttk.Frame(card); row.pack(anchor="w")
         self.refresh_btn = ttk.Button(row, text="Refresh connection", command=self.refresh); self.refresh_btn.pack(side="left", padx=(0,8))
         self.launch_btn = ttk.Button(row, text="Open tablet diagnostic", command=self.launch, state="disabled"); self.launch_btn.pack(side="left", padx=8)
         self.install_btn = ttk.Button(row, text="Install / update APK", command=self.install, state="disabled"); self.install_btn.pack(side="left", padx=8)
-        setup = ttk.LabelFrame(outer, text=" FIRST-TIME USB SETUP ", padding=14); setup.pack(fill="x", pady=16)
-        ttk.Label(setup, justify="left", text="1. Install Android SDK Platform-Tools (ADB) on Windows.\n2. On the tablet, enable Developer options, then USB debugging.\n3. Connect by USB, unlock the tablet and accept the debugging authorization prompt.\n4. Click Refresh connection.").pack(anchor="w")
-        ttk.Label(outer, text="ACTIVITY LOG", style="Muted.TLabel").pack(anchor="w", pady=(0,5))
-        self.log = tk.Text(outer, height=7, bg="#0b111a", fg="#c8d6e8", relief="flat", font=("Consolas",9), padx=9, pady=7, state="disabled")
+        link = ttk.LabelFrame(outer, text=" LIVE USB PEN DATA ", padding=13); link.pack(fill="x", pady=13)
+        self.link_status = ttk.Label(link, text="Not started — connect tablet first", font=("Segoe UI",12,"bold")); self.link_status.pack(anchor="w")
+        self.link_detail = ttk.Label(link, text="Starts a local TCP receiver and creates an ADB reverse tunnel over USB.", style="Muted.TLabel"); self.link_detail.pack(anchor="w", pady=5)
+        ttk.Button(link, text="Start USB pen link", command=self.start_link).pack(anchor="w", pady=(3,0))
+        self.live = ttk.LabelFrame(outer, text=" LAST RECEIVED PEN EVENT ", padding=13); self.live.pack(fill="x")
+        self.live_values = ttk.Label(self.live, text="Waiting for Android pen data…", style="Muted.TLabel", justify="left")
+        self.live_values.pack(anchor="w")
+        ttk.Label(outer, text="ACTIVITY LOG", style="Muted.TLabel").pack(anchor="w", pady=(12,5))
+        self.log = tk.Text(outer, height=6, bg="#0b111a", fg="#c8d6e8", relief="flat", font=("Consolas",9), padx=9, pady=7, state="disabled")
         self.log.pack(fill="both", expand=True)
-        self.write("PC companion started. USB/ADB connection manager ready.")
+        self.write("PC companion started. ADB connection manager ready.")
         root.after(300, self.refresh)
+        root.protocol("WM_DELETE_WINDOW", self.close)
 
     def write(self, msg):
         self.log.configure(state="normal"); self.log.insert("end", msg.rstrip()+"\n"); self.log.see("end"); self.log.configure(state="disabled")
@@ -86,7 +96,64 @@ class Host:
             self.status.configure(text="ADB ready — no tablet detected"); self.detail.configure(text="Connect tablet, enable USB debugging and accept the prompt.")
         state="normal" if self.device else "disabled"
         self.launch_btn.configure(state=state); self.install_btn.configure(state=state)
-        if not self.adb: self.write("ADB not found. Install: developer.android.com/tools/releases/platform-tools")
+        if not self.adb: self.write("ADB not found. Install Android SDK Platform-Tools.")
+
+    def start_link(self):
+        if not self.adb or not self.device:
+            messagebox.showwarning("USB Pen Display","Connect and authorize the tablet first, then refresh.")
+            return
+        self.link_status.configure(text="Starting USB pen receiver…")
+        def work():
+            try:
+                p=subprocess.run([self.adb,"-s",self.device,"reverse",f"tcp:{PORT}",f"tcp:{PORT}"],capture_output=True,text=True,timeout=12)
+                if p.returncode: raise RuntimeError((p.stderr or p.stdout).strip())
+                server=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+                server.bind(("127.0.0.1",PORT)); server.listen(1); server.settimeout(1.0)
+                self.server=server
+                self.root.after(0,lambda:self.link_status.configure(text="USB tunnel ready — open the tablet diagnostic"))
+                self.root.after(0,lambda:self.write(f"ADB reverse tunnel active on TCP {PORT}."))
+                self.server_thread=threading.Thread(target=self.accept_loop,daemon=True); self.server_thread.start()
+            except Exception as e:
+                self.root.after(0,lambda:self.link_status.configure(text="Could not start USB pen link"))
+                self.root.after(0,lambda:messagebox.showerror("USB Pen Display",str(e)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def accept_loop(self):
+        while self.server:
+            try:
+                conn,_=self.server.accept()
+                self.client_socket=conn
+                self.root.after(0,lambda:self.link_status.configure(text="ANDROID APP CONNECTED — receiving pen events"))
+                self.root.after(0,lambda:self.write("Android diagnostic connected through USB tunnel."))
+                threading.Thread(target=self.read_client,args=(conn,),daemon=True).start()
+            except socket.timeout: continue
+            except OSError: break
+
+    def read_client(self,conn):
+        try:
+            stream=conn.makefile("r",encoding="utf-8",errors="replace")
+            for line in stream:
+                try:
+                    data=json.loads(line)
+                    if data.get("type")=="hello":
+                        self.root.after(0,lambda:self.write("Android protocol handshake received."))
+                    elif data.get("type")=="pen":
+                        summary=(f"Tool: {data.get('tool')}    Event: {data.get('action')}\n"
+                                 f"X: {data.get('x',0):.1f}    Y: {data.get('y',0):.1f}    "
+                                 f"Pressure: {data.get('pressure',0):.4f}\n"
+                                 f"Tilt: {data.get('tilt',0):.4f} rad    Orientation: {data.get('orientation',0):.4f} rad\n"
+                                 f"Buttons: {data.get('buttons')}    Hover: {data.get('hover')}    Contact: {data.get('contact')}")
+                        self.root.after(0,lambda s=summary:self.live_values.configure(text=s))
+                except Exception as e:
+                    self.root.after(0,lambda:self.write("Invalid event received: "+str(e)))
+        except OSError: pass
+        finally:
+            try: conn.close()
+            except OSError: pass
+            if self.client_socket is conn:
+                self.client_socket=None
+                self.root.after(0,lambda:self.link_status.configure(text="USB receiver ready — waiting for Android app"))
 
     def launch(self):
         if not self.adb or not self.device: return
@@ -94,8 +161,7 @@ class Host:
             try:
                 p=subprocess.run([self.adb,"-s",self.device,"shell","monkey","-p",APP_ID,"1"],capture_output=True,text=True,timeout=15)
                 if p.returncode: raise RuntimeError((p.stderr or p.stdout).strip())
-                msg="Launch command sent to tablet."
-                self.root.after(0,lambda:self.write(msg))
+                self.root.after(0,lambda:self.write("Launch command sent to tablet."))
             except Exception as e: self.root.after(0,lambda:messagebox.showerror("USB Pen Display",str(e)))
         threading.Thread(target=work,daemon=True).start()
 
@@ -111,6 +177,15 @@ class Host:
                 self.root.after(0,lambda:messagebox.showinfo("USB Pen Display","APK installed successfully."))
             except Exception as e: self.root.after(0,lambda:messagebox.showerror("USB Pen Display",str(e)))
         threading.Thread(target=work,daemon=True).start()
+
+    def close(self):
+        try:
+            if self.client_socket: self.client_socket.close()
+            if self.server: self.server.close()
+            if self.adb and self.device:
+                subprocess.Popen([self.adb,"-s",self.device,"reverse","--remove",f"tcp:{PORT}"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        except Exception: pass
+        self.root.destroy()
 
 def main():
     root=tk.Tk(); Host(root); root.mainloop()
