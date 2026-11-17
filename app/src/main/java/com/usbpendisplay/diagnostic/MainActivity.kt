@@ -167,13 +167,19 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
         c.drawText("Pressure: %.3f   Maximum: %.3f   Buttons: %d".format(pressure, maxPressure, buttons), margin, 146f, label)
         val rect = RectF(margin, canvasTop, width - margin, height - bottom)
         c.drawRoundRect(rect, 12f, 12f, board)
-        c.save(); c.clipRect(rect)
+        // Stroke paths are stored relative to the white board, so translate
+        // the drawing canvas to the board origin before rendering them.
+        c.save()
+        c.clipRect(rect)
+        c.translate(margin, canvasTop)
         for (stroke in strokes) c.drawPath(stroke.path, stroke.paint)
+        c.restore()
+        // Hover cursor uses raw view coordinates, so draw it after restoring.
         if (hover && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
             val cursor = Paint(3).apply { color = Color.rgb(0, 130, 220); style = Paint.Style.STROKE; strokeWidth = 2f }
             c.drawCircle(x, y, 9f, cursor)
         }
-        c.restore(); c.drawRoundRect(rect, 12f, 12f, border)
+        c.drawRoundRect(rect, 12f, 12f, border)
     }
 }
 private object PenLinkHolder { var client: PenLinkClient? = null }
