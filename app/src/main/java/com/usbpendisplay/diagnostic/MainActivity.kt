@@ -28,7 +28,7 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(12, 17, 27)
         window.navigationBarColor = Color.rgb(12, 17, 27)
         link = PenLinkClient { connected -> runOnUiThread { if (::panel.isInitialized) panel.setPcLink(connected) } }
-        video = VideoFrameClient { bitmap -> runOnUiThread { if (::panel.isInitialized) panel.setVideoFrame(bitmap) } }
+        video = VideoFrameClient { bitmap -> if (::panel.isInitialized) panel.setVideoFrame(bitmap) }
         video.start()
         PenLinkHolder.client = link
         panel = PenCanvasView(this)
@@ -204,7 +204,7 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
         if (frame != null) {
             val srcW = frame.width.toFloat()
             val srcH = frame.height.toFloat()
-            val scale = maxOf(width / srcW, height / srcH)
+            val scale = minOf(width / srcW, height / srcH)
             val dstW = srcW * scale
             val dstH = srcH * scale
             val dst = RectF((width - dstW) / 2f, (height - dstH) / 2f,
