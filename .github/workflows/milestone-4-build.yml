@@ -91,6 +91,27 @@ jobs:
           mkdir -p bundle/Windows/Virtual-Display-Driver
           cp windows-host/driver/setup-virtual-display-driver.ps1 bundle/Windows/Virtual-Display-Driver/
           cp windows-host/driver/README.txt bundle/Windows/Virtual-Display-Driver/
+          python - <<'PY'
+          import json, pathlib, urllib.request, zipfile
+          api = "https://api.github.com/repos/VirtualDrivers/Virtual-Display-Driver/releases/tags/24.10.27"
+          req = urllib.request.Request(api, headers={"User-Agent": "USB-Pen-Display-Build", "Accept": "application/vnd.github+json"})
+          with urllib.request.urlopen(req, timeout=45) as response:
+              release = json.load(response)
+          assets = [a for a in release.get("assets", []) if a["name"].lower().endswith(".zip")]
+          assets.sort(key=lambda a: ("driver" not in a["name"].lower(), "source" in a["name"].lower(), a["name"]))
+          if not assets:
+              raise SystemExit("No distributable ZIP asset was found in the official VirtualDrivers release.")
+          asset = assets[0]
+          out = pathlib.Path("bundle/Windows/Virtual-Display-Driver") / asset["name"]
+          req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "USB-Pen-Display-Build"})
+          with urllib.request.urlopen(req, timeout=180) as response, out.open("wb") as target:
+              target.write(response.read())
+          if not zipfile.is_zipfile(out):
+              raise SystemExit("The official driver asset did not download as a valid ZIP.")
+          with zipfile.ZipFile(out) as archive:
+              archive.extractall(out.parent / "Extracted-Driver-Files")
+          print(f"Bundled official driver asset: {asset['name']} ({asset['size']} bytes)")
+          PY
           cat > bundle/README-MILESTONE-4.txt <<'EOF'
           USB PEN DISPLAY - MILESTONE 4 DEVELOPMENT BUILD
 
@@ -98,7 +119,7 @@ jobs:
           - Android/app-debug.apk: Lenovo Tab P12 app (screen receiver + stylus telemetry sender)
           - Windows/USBPenDisplayHost.exe: PC companion (screen capture + pen pressure diagnostics)
           - Windows/platform-tools/: bundled ADB tools; no separate ADB download is needed
-          - Windows/Virtual-Display-Driver/: setup helper and instructions for the existing signed Virtual Display Driver
+          - Windows/Virtual-Display-Driver/: official VirtualDrivers release ZIP, extracted driver package, setup helper and instructions
 
           SET UP THE VIRTUAL SECOND MONITOR (ONE TIME)
           1. Open Windows/Virtual-Display-Driver/README.txt.
@@ -119,7 +140,7 @@ jobs:
           8. Drag a window onto the virtual monitor in Windows. It should appear on the tablet.
 
           IMPORTANT
-          - The existing Virtual Display Driver is installed separately by the included helper from its official WinGet source. The third-party driver binaries are not repackaged in this ZIP.
+          - The official VirtualDrivers release ZIP and its extracted files are bundled in this ZIP; no separate driver download should be needed.
           - Virtual display driver installation requires administrator approval.
           - Windows 10/11 compatibility is provided by the third-party driver's current release; check its release notes for system-specific requirements.
           - The PC app captures whichever display you select. It does not silently switch displays.
