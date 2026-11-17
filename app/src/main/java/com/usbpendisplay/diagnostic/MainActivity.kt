@@ -24,6 +24,7 @@ class MainActivity : Activity() {
         link = PenLinkClient { connected ->
             runOnUiThread { if (::panel.isInitialized) panel.setPcLink(connected) }
         }
+        PenLinkHolder.client = link
         panel = PenDiagnosticView(this)
         window.statusBarColor = Color.rgb(12, 17, 27)
         window.navigationBarColor = Color.rgb(12, 17, 27)
@@ -43,6 +44,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         if (::link.isInitialized) link.stop()
+        PenLinkHolder.client = null
         super.onDestroy()
     }
 }
