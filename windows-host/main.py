@@ -28,7 +28,6 @@ class Host:
         self.adb = None
         self.device = None
         self.busy = False
-        self.monitor_busy = False
         self.receiver_started = False
         self.video_requested = False
         self.server = None
@@ -108,7 +107,6 @@ class Host:
         self.log.pack(fill="x")
         self.write("Ready. Start the receiver, then open the tablet app.")
         root.after(250, self.refresh)
-        root.after(2000, self.monitor_usb)
         root.after(30, self.process_messages)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -118,79 +116,6 @@ class Host:
         self.log.see("end")
         self.log.configure(state="disabled")
 
-
-    def monitor_usb(self):
-        if not self.monitor_busy and not self.busy:
-            self.monitor_busy = True
-            def work():
-                result = {}
-                try:
-                    adb = find_adb()
-                    if adb:
-                        p = subprocess.run([adb, "devices", "-l"], capture_output=True, text=True, timeout=8)
-                        lines = [x.strip() for x in p.stdout.splitlines()[1:] if x.strip()]
-                        good = next((x for x in lines if len(x.split()) > 1 and x.split()[1] == "device"), None)
-                        unauthorized = any("unauthorized" in x for x in lines)
-                        if good:
-                            parts = good.split()
-                            model = next((x.split(":", 1)[1] for x in parts[2:] if x.startswith("model:")), "")
-                            result = {"adb": adb, "device": parts[0], "model": model.replace("_", " ")}
-                        else:
-                            result = {"adb": adb, "unauthorized": unauthorized}
-                    else:
-                        result = {"adb": None}
-                except Exception as exc:
-                    result = {"error": str(exc)}
-                self.root.after(0, lambda: self.finish_monitor(result))
-            threading.Thread(target=work, daemon=True).start()
-        self.root.after(2000, self.monitor_usb)
-
-    def finish_monitor(self, result):
-        self.monitor_busy = False
-        new_device = result.get("device")
-        old_device = self.device
-        self.adb = result.get("adb")
-        if new_device != old_device:
-            self.device = new_device
-            if new_device:
-                self.status.configure(text="TABLET CONNECTED • " + new_device)
-                self.detail.configure(text=result.get("model") or "USB debugging authorized.")
-                self.write("USB tablet detected: " + new_device)
-                self.launch_btn.configure(state="normal")
-                self.install_btn.configure(state="normal")
-                if self.receiver_started or self.video_requested:
-                    threading.Thread(target=self.restore_usb_tunnels, args=(self.adb, new_device), daemon=True).start()
-            else:
-                self.status.configure(text="Waiting for USB tablet…")
-                self.detail.configure(text="Connect the tablet to any USB port and approve USB debugging if prompted.")
-                self.launch_btn.configure(state="disabled")
-                self.install_btn.configure(state="disabled")
-                if old_device:
-                    self.write("USB tablet disconnected; waiting for reconnection.")
-        elif not new_device and result.get("unauthorized"):
-            self.status.configure(text="Tablet detected — authorization required")
-            self.detail.configure(text="Unlock tablet and accept the USB debugging prompt.")
-        elif not new_device and not result.get("error"):
-            self.status.configure(text="Waiting for USB tablet…")
-            self.detail.configure(text="Connect the tablet to any USB port.")
-        if result.get("error"):
-            self.detail.configure(text="ADB monitor: " + result["error"])
-
-    def restore_usb_tunnels(self, adb, device):
-        try:
-            ports = []
-            if self.receiver_started:
-                ports.append(PORT)
-            if self.video_requested:
-                ports.append(27184)
-            for port in ports:
-                p = subprocess.run([adb, "-s", device, "reverse", f"tcp:{port}", f"tcp:{port}"],
-                                   capture_output=True, text=True, timeout=10)
-                if p.returncode:
-                    raise RuntimeError((p.stderr or p.stdout).strip())
-            self.root.after(0, lambda: self.write("USB forwarding restored for " + device))
-        except Exception as exc:
-            self.root.after(0, lambda e=str(exc): self.write("USB forwarding will retry: " + e))
 
     def refresh(self):
         if self.busy:
@@ -204,15 +129,25 @@ class Host:
                     result = {"adb": None}
                 else:
                     p = subprocess.run([adb, "devices", "-l"], capture_output=True, text=True, timeout=12)
+                    output = p.stdout.strip()
                     lines = [x.strip() for x in p.stdout.splitlines()[1:] if x.strip()]
                     good = next((x for x in lines if len(x.split()) > 1 and x.split()[1] == "device"), None)
+                    if not good:
+                        # A port change can leave ADB holding a stale USB transport.
+                        # Restart ADB only as part of the user's manual Refresh action.
+                        subprocess.run([adb, "kill-server"], capture_output=True, text=True, timeout=8)
+                        subprocess.run([adb, "start-server"], capture_output=True, text=True, timeout=12)
+                        p = subprocess.run([adb, "devices", "-l"], capture_output=True, text=True, timeout=12)
+                        output = p.stdout.strip()
+                        lines = [x.strip() for x in p.stdout.splitlines()[1:] if x.strip()]
+                        good = next((x for x in lines if len(x.split()) > 1 and x.split()[1] == "device"), None)
                     unauthorized = any("unauthorized" in x for x in lines)
                     if good:
                         parts = good.split()
                         model = next((x.split(":", 1)[1] for x in parts[2:] if x.startswith("model:")), "")
-                        result = {"adb": adb, "device": parts[0], "model": model.replace("_", " ")}
+                        result = {"adb": adb, "device": parts[0], "model": model.replace("_", " "), "raw": output}
                     else:
-                        result = {"adb": adb, "unauthorized": unauthorized}
+                        result = {"adb": adb, "unauthorized": unauthorized, "raw": output}
             except Exception as exc:
                 result = {"error": str(exc)}
             self.root.after(0, lambda: self.finish_refresh(result))
@@ -238,7 +173,9 @@ class Host:
             self.detail.configure(text="Unlock tablet and accept USB debugging.")
         else:
             self.status.configure(text="ADB ready — tablet not detected")
-            self.detail.configure(text="Reconnect the USB cable and refresh.")
+            raw = result.get("raw", "")
+            self.detail.configure(text=("ADB sees no authorized device. Check the tablet's USB debugging driver. " + raw[-140:]).strip())
+            self.write("ADB device scan returned: " + (raw or "(no device entries)"))
         state = "normal" if self.device else "disabled"
         self.launch_btn.configure(state=state)
         self.install_btn.configure(state=state)
