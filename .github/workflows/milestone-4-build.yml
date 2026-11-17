@@ -1,0 +1,178 @@
+name: Build Milestone 4 Bundle
+
+on:
+  push:
+    branches: [ "milestone-4" ]
+    paths:
+      - "app/**"
+      - "windows-host/**"
+      - ".github/workflows/milestone-4-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android SDK packages
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Build APK
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: "8.9"
+          arguments: --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: milestone4-android
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-host:
+    name: Build Windows Companion
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r windows-host/requirements.txt pyinstaller
+      - name: Build Windows executable
+        working-directory: windows-host
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name USBPenDisplayHost main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: milestone4-windows-host
+          path: windows-host/dist/USBPenDisplayHost.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  iddcx-driver:
+    name: Build Microsoft IddCx virtual display sample
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout Microsoft driver sample
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/microsoft/Windows-driver-samples.git _driver_samples
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+      - name: Build IddCx sample for x64
+        shell: pwsh
+        run: |
+          $solution = "_driver_samples/video/IndirectDisplay/IddSampleDriver.sln"
+          msbuild $solution /m /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "IddCx sample build failed." }
+      - name: Collect driver package, sample app and source
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD "driver-output"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $driverRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay/IddSampleDriver"
+          $appRoot = Join-Path $PWD "_driver_samples/video/IndirectDisplay/IddSampleApp"
+
+          $cat = Get-ChildItem $driverRoot -Recurse -Filter "IddSampleDriver.cat" | Select-Object -First 1
+          if (-not $cat) { throw "The IddCx build did not produce IddSampleDriver.cat." }
+          $packageDir = $cat.Directory.FullName
+          foreach ($name in @("IddSampleDriver.cat", "IddSampleDriver.inf", "IddSampleDriver.dll")) {
+            $item = Join-Path $packageDir $name
+            if (-not (Test-Path $item)) { throw "Expected driver package file missing: $item" }
+            Copy-Item $item $out
+          }
+
+          $cert = Get-ChildItem $driverRoot -Recurse -Filter "IddSampleDriver.cer" | Select-Object -First 1
+          if ($cert) { Copy-Item $cert.FullName (Join-Path $out "IddSampleDriver.cer") }
+
+          $app = Get-ChildItem $appRoot -Recurse -Filter "IddSampleApp.exe" |
+            Where-Object { $_.FullName -match "x64\\Release" } | Select-Object -First 1
+          if (-not $app) { throw "IddSampleApp.exe was not produced." }
+          Copy-Item $app.FullName (Join-Path $out "IddSampleApp.exe")
+
+          Copy-Item "windows-host/driver/*.ps1" $out
+          Copy-Item "windows-host/driver/README.txt" $out
+          $sourceOut = Join-Path $out "Microsoft-IddCx-Sample-Source"
+          Copy-Item "_driver_samples/video/IndirectDisplay" $sourceOut -Recurse
+          if (Test-Path "_driver_samples/LICENSE") {
+            Copy-Item "_driver_samples/LICENSE" (Join-Path $out "Microsoft-Windows-driver-samples-LICENSE")
+          }
+          Get-ChildItem $out -Recurse | Select-Object FullName,Length | Format-Table -AutoSize
+      - uses: actions/upload-artifact@v4
+        with:
+          name: milestone4-iddcx-driver
+          path: driver-output/**
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: Assemble Milestone 4 ZIP
+    runs-on: ubuntu-latest
+    needs: [android, windows-host, iddcx-driver]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: milestone4-android
+          path: bundle/Android
+      - uses: actions/download-artifact@v4
+        with:
+          name: milestone4-windows-host
+          path: bundle/Windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: milestone4-iddcx-driver
+          path: bundle/Windows/Virtual-Display-Driver
+      - name: Add installation guide and create ZIP
+        run: |
+          cat > bundle/README-MILESTONE-4.txt <<'EOF'
+          USB PEN DISPLAY - MILESTONE 4 DEVELOPMENT PREVIEW
+
+          CONTENTS
+          - Android/app-debug.apk: tablet-side app (USB video receiver + stylus telemetry sender)
+          - Windows/USBPenDisplayHost.exe: PC companion (pen telemetry + selectable Windows display capture)
+          - Windows/Virtual-Display-Driver: Microsoft IddCx sample driver package, helper app, scripts and source
+
+          FIRST-TIME DRIVER SETUP (DEVELOPMENT TEST DRIVER)
+          1. Read Virtual-Display-Driver/README.txt completely.
+          2. Windows driver test-signing mode is required for a test-signed development driver.
+          3. If you choose to enable it, run enable-test-mode.ps1 as Administrator and reboot.
+          4. Run install-driver.ps1 as Administrator.
+          5. Run IddSampleApp.exe and leave it open. This sample app creates the software device; closing it removes the virtual monitor.
+          6. Open Windows Settings > System > Display and choose Extend these displays.
+          7. Connect the tablet over USB, enable USB debugging and accept the authorization prompt.
+          8. Run USBPenDisplayHost.exe, click Refresh tablet, start the USB receiver, then open the Android APK.
+          9. Click Refresh displays, select the virtual display, and click Start screen video.
+
+          IMPORTANT LIMITATIONS
+          - This is a development milestone, not a production-ready signed driver.
+          - The IddCx driver is Microsoft's sample, not yet our finished custom transport driver.
+          - The PC companion captures the selected Windows display and streams it over the existing ADB USB tunnel.
+          - The tablet's stylus telemetry path remains separate and continues to use TCP port 27183.
+          - The video channel continues to use TCP port 27184.
+          - Windows may block test-signing mode when Secure Boot or policy restrictions are active.
+          - Do not disable Secure Boot unless you understand the security consequences.
+          - This build does not yet inject the tablet stylus into Windows Ink as a native Windows pen.
+          EOF
+          cd bundle
+          zip -r ../Milestone-4-Build.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Milestone-4-Build
+          path: Milestone-4-Build.zip
+          if-no-files-found: error
+          retention-days: 14
