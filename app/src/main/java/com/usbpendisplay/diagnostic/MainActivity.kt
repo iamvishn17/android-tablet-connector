@@ -4,6 +4,8 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -20,11 +22,14 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
     private lateinit var panel: PenCanvasView
     private lateinit var link: PenLinkClient
+    private lateinit var video: VideoFrameClient
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(12, 17, 27)
         window.navigationBarColor = Color.rgb(12, 17, 27)
         link = PenLinkClient { connected -> runOnUiThread { if (::panel.isInitialized) panel.setPcLink(connected) } }
+        video = VideoFrameClient { bitmap -> runOnUiThread { if (::panel.isInitialized) panel.setVideoFrame(bitmap) } }
+        video.start()
         PenLinkHolder.client = link
         panel = PenCanvasView(this)
         setContentView(panel)
@@ -32,6 +37,7 @@ class MainActivity : Activity() {
     }
     override fun onDestroy() {
         if (::link.isInitialized) link.stop()
+        if (::video.isInitialized) video.stop()
         PenLinkHolder.client = null
         super.onDestroy()
     }
@@ -77,6 +83,38 @@ private class PenLinkClient(private val onConnection: (Boolean) -> Unit) {
     fun stop() { running = false; worker?.interrupt(); worker = null; queue.clear() }
 }
 
+
+private class VideoFrameClient(private val onFrame: (Bitmap) -> Unit) {
+    @Volatile private var running = false
+    private var worker: Thread? = null
+    fun start() {
+        if (running) return
+        running = true
+        worker = thread(name = "UsbVideoReceiver", isDaemon = true) {
+            while (running) {
+                var socket: Socket? = null
+                try {
+                    socket = Socket()
+                    socket.tcpNoDelay = true
+                    socket.connect(InetSocketAddress("127.0.0.1", 27184), 1500)
+                    val input = java.io.DataInputStream(socket.getInputStream())
+                    while (running && !socket.isClosed) {
+                        val size = input.readInt()
+                        if (size <= 0 || size > 8 * 1024 * 1024) throw java.io.IOException("Invalid video frame size: $size")
+                        val bytes = ByteArray(size)
+                        input.readFully(bytes)
+                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bitmap != null) onFrame(bitmap)
+                    }
+                } catch (_: Exception) {
+                    if (running) try { Thread.sleep(900) } catch (_: InterruptedException) { }
+                } finally { try { socket?.close() } catch (_: Exception) { } }
+            }
+        }
+    }
+    fun stop() { running = false; worker?.interrupt(); worker = null }
+}
+
 private data class LocalStroke(val path: Path, val paint: Paint)
 
 private class PenCanvasView(context: android.content.Context) : View(context) {
@@ -88,6 +126,8 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
     private val strokes = mutableListOf<LocalStroke>()
     private var activeStroke: LocalStroke? = null
     private var pcConnected = false
+    @Volatile private var videoFrame: Bitmap? = null
+    fun setVideoFrame(bitmap: Bitmap) { videoFrame = bitmap; postInvalidate() }
     private var eventCount = 0L
     private var tool = "Move stylus on the white canvas"
     private var action = "Waiting"
@@ -160,13 +200,17 @@ private class PenCanvasView(context: android.content.Context) : View(context) {
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
         c.drawColor(Color.rgb(12, 17, 27))
-        c.drawText("USB PEN PRESSURE TEST", margin, 38f, heading)
-        c.drawText("Draw on the white canvas. Stroke thickness follows pressure.", margin, 65f, label)
+        c.drawText("USB PEN DISPLAY — VIDEO + PEN TEST", margin, 38f, heading)
+        c.drawText("PC screen video appears below when the Windows host starts streaming.", margin, 65f, label)
         c.drawText("PC LINK: " + (if (pcConnected) "CONNECTED" else "WAITING"), margin, 100f, value)
         c.drawText("INPUT: $tool | $action | events: $eventCount", margin, 126f, label)
         c.drawText("Pressure: %.3f   Maximum: %.3f   Buttons: %d".format(pressure, maxPressure, buttons), margin, 146f, label)
         val rect = RectF(margin, canvasTop, width - margin, height - bottom)
         c.drawRoundRect(rect, 12f, 12f, board)
+        videoFrame?.let { frame ->
+            val dst = RectF(rect.left + 2f, rect.top + 2f, rect.right - 2f, rect.bottom - 2f)
+            c.save(); c.clipRect(dst); c.drawBitmap(frame, null, dst, Paint(Paint.FILTER_BITMAP_FLAG)); c.restore()
+        }
         // Stroke paths are stored relative to the white board, so translate
         // the drawing canvas to the board origin before rendering them.
         c.save()
