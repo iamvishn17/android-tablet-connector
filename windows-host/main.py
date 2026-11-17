@@ -1,4 +1,5 @@
 import json, os, platform, queue, shutil, socket, subprocess, threading, tkinter as tk
+from video_stream import VideoStreamer
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -38,6 +39,7 @@ class Host:
         self.last_pressure = 0.0
         self.last_point = None
         self.last_pointer = None
+        self.video_streamer = VideoStreamer(self.write)
 
         root.title("USB Pen Display — Pressure Canvas")
         root.geometry("1050x850")
@@ -67,6 +69,7 @@ class Host:
         self.refresh_btn = ttk.Button(buttons, text="Refresh tablet", command=self.refresh)
         self.refresh_btn.pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text="Start USB receiver", command=self.start_link).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Start screen video", command=self.start_video).pack(side="left", padx=6)
         self.launch_btn = ttk.Button(buttons, text="Open tablet app", command=self.launch, state="disabled")
         self.launch_btn.pack(side="left", padx=6)
         self.install_btn = ttk.Button(buttons, text="Install / update APK", command=self.install, state="disabled")
@@ -189,6 +192,12 @@ class Host:
             except Exception as exc:
                 self.root.after(0, lambda e=str(exc): messagebox.showerror("USB Pen Display", e))
         threading.Thread(target=work, daemon=True).start()
+
+    def start_video(self):
+        if not self.adb or not self.device:
+            messagebox.showwarning("USB Pen Display", "Connect and authorize the tablet first.")
+            return
+        self.video_streamer.start(self.adb, self.device)
 
     def accept_loop(self):
         while self.server:
@@ -344,6 +353,7 @@ class Host:
         try:
             if self.client_socket:
                 self.client_socket.close()
+            self.video_streamer.stop(self.adb, self.device)
             if self.server:
                 self.server.close()
             if self.adb and self.device:
