@@ -1,4 +1,4 @@
-import json, os, platform, queue, shutil, socket, subprocess, threading, tkinter as tk
+import json, os, platform, queue, shutil, socket, subprocess, sys, threading, tkinter as tk
 from video_stream import VideoStreamer, list_monitors
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -10,8 +10,14 @@ def find_adb():
     found = shutil.which("adb") or shutil.which("adb.exe")
     if found:
         return found
-    roots = [os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"),
-             str(Path.home() / "AppData/Local/Android/Sdk"), "C:/platform-tools"]
+    roots = [
+        str(Path(sys.executable).resolve().parent),
+        str(Path(__file__).resolve().parent),
+        os.environ.get("ANDROID_HOME"),
+        os.environ.get("ANDROID_SDK_ROOT"),
+        str(Path.home() / "AppData/Local/Android/Sdk"),
+        "C:/platform-tools",
+    ]
     for root in roots:
         if root:
             candidate = Path(root) / "platform-tools" / "adb.exe"
