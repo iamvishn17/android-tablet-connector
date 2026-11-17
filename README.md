@@ -46,3 +46,12 @@ On Windows 10 or 11, install Python 3.11+ and run windows-host/build.bat. The ex
 5. Package and optimize the complete wired extended-display product.
 
 The current build only proves the USB pen-data transport; it does not yet create an extended desktop.
+
+
+## Milestone 4 development preview
+
+Milestone 4 adds a selectable Windows display source to the PC companion and a combined GitHub Actions package containing the Android APK, Windows companion, and a Microsoft IddCx sample driver package. The virtual display is a development preview: install the test driver, run `IddSampleApp.exe` to create the virtual monitor, switch Windows to Extend mode, then select that display in the PC companion.
+
+The driver is based on Microsoft's official IddCx sample and is not a production-signed driver. Review the driver setup notes in the Milestone 4 ZIP before enabling Windows test-signing mode.
+
+Build bundle: GitHub Actions → **Build Milestone 4 Bundle** → latest successful run → **Milestone-4-Build** artifact.
