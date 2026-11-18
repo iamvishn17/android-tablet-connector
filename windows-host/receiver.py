@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
+from vmulti_bridge import VMultiBridge
 
 PACKAGE = "dev.anydisplay.client"
 POLL_SECONDS = 2.0
@@ -31,6 +32,8 @@ class Receiver:
         self.worker_busy = False
         self.stopping = False
         self.last_log = ""
+        self.vm_bridge = VMultiBridge(self.write)
+        self.vm_bridge.start()
         self.root.title("USB Pen Display")
         self.root.geometry("900x650")
         self.root.minsize(760, 560)
@@ -93,7 +96,7 @@ class Receiver:
         self.log.pack(fill="both", expand=True, pady=(8, 0))
         self.write("Receiver ready. Waiting for a USB-authorized Android tablet.")
         self.write("When detected, the receiver installs/opens the tablet client and starts the display session.")
-        self.write("Pen pressure is sent through AnyDisplay's native Windows synthetic-pen input path.")
+        self.write("Pen output backend: VMulti virtual HID digitizer (Windows Ink).")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(500, self.tick)
 
@@ -217,6 +220,11 @@ class Receiver:
             install = self.adb_run(["-s", serial, "install", "-r", str(self.apk)], timeout=120)
             if install.returncode != 0:
                 raise RuntimeError((install.stderr or install.stdout).strip() or "APK installation failed.")
+            self.events.put(("log", "Opening the USB reverse tunnel for pen telemetry…"))
+            reverse = self.adb_run(["-s", serial, "reverse", "tcp:27183", "tcp:27183"], timeout=15)
+            if reverse.returncode != 0:
+                raise RuntimeError((reverse.stderr or reverse.stdout).strip() or "Could not establish the pen telemetry USB tunnel.")
+            self.events.put(("log", "VMulti pen telemetry tunnel is ready."))
             self.events.put(("log", "Launching the tablet display client…"))
             launch = self.adb_run(["-s", serial, "shell", "monkey", "-p", PACKAGE, "1"], timeout=20)
             if launch.returncode != 0:
@@ -281,6 +289,12 @@ class Receiver:
     def close(self):
         self.stopping = True
         self.stop_host_process()
+        if self.device:
+            try:
+                self.adb_run(["-s", self.device, "reverse", "--remove", "tcp:27183"], timeout=5)
+            except Exception:
+                pass
+        self.vm_bridge.stop()
         self.root.destroy()
 
 def main():
