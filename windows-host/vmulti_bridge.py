@@ -108,7 +108,7 @@ class VMultiBridge:
         buttons = 0
         if in_range:
             buttons |= 0x10
-        if contact and pressure > 0:
+        if contact:
             buttons |= 0x01
         if tool == "ERASER":
             buttons |= 0x04
