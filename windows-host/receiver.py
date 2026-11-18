@@ -152,7 +152,7 @@ class Receiver:
                     self.worker_busy = False
                 elif kind == "host_started":
                     self.stream_value.configure(text="Host running — connecting")
-                    self.pen_value.configure(text="VMulti pen backend running")
+                    self.pen_value.configure(text="VMulti backend selected")
                     self.stop_button.configure(state="normal")
                 elif kind == "setup_failed":
                     self.worker_busy = False
