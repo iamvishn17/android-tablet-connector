@@ -32,8 +32,6 @@ class Receiver:
         self.worker_busy = False
         self.stopping = False
         self.last_log = ""
-        self.vm_bridge = VMultiBridge(self.write)
-        self.vm_bridge.start()
         self.root.title("USB Pen Display")
         self.root.geometry("900x650")
         self.root.minsize(760, 560)
@@ -96,6 +94,8 @@ class Receiver:
         self.log.pack(fill="both", expand=True, pady=(8, 0))
         self.write("Receiver ready. Waiting for a USB-authorized Android tablet.")
         self.write("When detected, the receiver installs/opens the tablet client and starts the display session.")
+        self.vm_bridge = VMultiBridge(self.write)
+        self.vm_bridge.start()
         self.write("Pen output backend: VMulti virtual HID digitizer (Windows Ink).")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(500, self.tick)
