@@ -94,7 +94,7 @@ class Receiver:
         self.log.pack(fill="both", expand=True, pady=(8, 0))
         self.write("Receiver ready. Waiting for a USB-authorized Android tablet.")
         self.write("When detected, the receiver installs/opens the tablet client and starts the display session.")
-        self.vm_bridge = VMultiBridge(self.write)
+        self.vm_bridge = VMultiBridge(lambda message: self.events.put(("log", message)))
         self.vm_bridge.start()
         self.write("Pen output backend: VMulti virtual HID digitizer (Windows Ink).")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
