@@ -152,7 +152,7 @@ class Receiver:
                     self.worker_busy = False
                 elif kind == "host_started":
                     self.stream_value.configure(text="Host running — connecting")
-                    self.pen_value.configure(text="Native pen input enabled")
+                    self.pen_value.configure(text="VMulti pen backend running")
                     self.stop_button.configure(state="normal")
                 elif kind == "setup_failed":
                     self.worker_busy = False
@@ -191,6 +191,11 @@ class Receiver:
                 self.connection_value.configure(text="Not connected")
                 if self.device or self.host_process:
                     self.write("Tablet disconnected.")
+                    if self.device:
+                        try:
+                            self.adb_run(["-s", self.device, "reverse", "--remove", "tcp:27183"], timeout=5)
+                        except Exception:
+                            pass
                     self.stop_host_process()
                 self.device = None
                 self.session_device = None
