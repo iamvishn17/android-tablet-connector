@@ -136,20 +136,21 @@ jobs:
           - Installs/updates and launches the AnyDisplay Android client.
           - Starts the AnyDisplay Windows host over ADB USB forwarding.
           - Streams the selected Windows display to the tablet using hardware H.264 encoding/decoding where available.
-          - Sends stylus pressure, coordinates, tilt, eraser and pen contact through AnyDisplay's native Windows synthetic-pen input path.
+          - Sends stylus pressure, coordinates, tilt, eraser and contact through the VMulti virtual HID digitizer backend (Windows Ink).
           - Provides one Windows interface for connection state, stream state, logs, retry and stop.
           
           INSTALL AND USE
           1. Extract the entire ZIP to a normal folder. Do not move files out of their folders.
           2. On the tablet, enable Developer options and USB debugging.
           3. Connect the tablet to the PC with a USB data cable, unlock it and accept the USB debugging authorization prompt.
-          4. Double-click Start-USB-Pen-Display.bat.
-          5. The receiver detects the tablet and starts the display session automatically.
-          6. Keep the receiver open while using the tablet as your display/pen tablet.
+          4. Install the VMulti virtual HID driver from https://github.com/X9VoiD/vmulti-bin/releases/latest (extract it and run install_hiddriver.bat as Administrator; restart Windows if requested). This is required for pressure-sensitive pen output.
+          5. Double-click Start-USB-Pen-Display.bat.
+          6. The receiver detects the tablet and starts the display session automatically.
+          7. Keep the receiver open while using the tablet as your display/pen tablet.
           
           PEN PRESSURE — IMPORTANT
-          Pressure is not a separate test or preview feature. The Android client sends stylus MotionEvents through AnyDisplay's PEN protocol. The Windows host converts those samples into synthetic Windows pen pointer events with pressure/tilt masks. Compatible drawing applications can consume that as pen input while the stream is active.
-          This is the native input path; the old separate pressure diagnostic window is not part of this build.
+          Pressure is not a separate test or preview feature. The Android client sends stylus MotionEvents through its JSON telemetry channel over ADB reverse USB forwarding. The Windows receiver translates coordinates, pressure, tilt, contact, eraser and barrel-button state into VMulti digitizer HID reports. Windows receives VMulti as a virtual pen device; compatible drawing applications can consume its Windows Ink pressure input.
+          VMulti is a separate kernel driver and must be installed manually. The old separate pressure diagnostic window is not part of this build.
           
           EXTENDED DISPLAY
           AnyDisplay uses the Virtual Display Driver (VDD) to create a real extra Windows monitor. Without VDD, the session mirrors a selected existing monitor.
@@ -161,8 +162,10 @@ jobs:
           - If Windows asks about USB debugging, unlock the tablet and accept the authorization prompt.
           - If the receiver cannot find ADB, re-extract the complete ZIP; platform-tools/adb.exe must remain inside the Windows folder.
           - If the tablet is connected but sharing fails, press Reconnect / Retry in the receiver.
+          - If the receiver log says VMulti is not detected, install the VMulti driver as Administrator and restart Windows.
+          - In drawing applications, enable Windows Ink / Tablet PC pen input where the application offers that setting.
           - Close and reopen the receiver after changing USB ports or reinstalling the Android client.
-          - Input into elevated/admin applications may require running the receiver as administrator because Windows blocks lower-integrity input injection.
+          - VMulti is a kernel-level virtual HID input device; its driver must be installed by an administrator. The receiver itself normally does not need administrator privileges.
           
           VALIDATION NOTE
           CI verifies that the Android APK, Windows host and receiver package compile successfully. Actual USB stability, Lenovo Tab P12 stylus behavior, Windows Ink compatibility and application-specific pressure response must still be tested on the physical Windows 10 PC and tablet. A successful build is not a substitute for that hardware test.
