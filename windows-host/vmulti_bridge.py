@@ -132,6 +132,8 @@ class VMultiBridge:
         ))
 
     def _send(self, packet):
+        if str(packet.get("tool", "")).upper() not in ("STYLUS", "ERASER"):
+            return
         if not self._open_device():
             return
         try:
