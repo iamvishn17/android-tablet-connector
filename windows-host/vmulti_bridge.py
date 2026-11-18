@@ -145,6 +145,8 @@ class VMultiBridge:
             self._close_device()
 
     def _serve(self):
+        # Probe immediately so a missing driver is visible before the user starts drawing.
+        self._open_device()
         try:
             self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
